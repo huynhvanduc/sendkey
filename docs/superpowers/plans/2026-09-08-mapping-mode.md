@@ -150,7 +150,7 @@ public class MappingTests
     [Fact]
     public void ParseCsv_quoted_field_with_comma_and_escaped_quote()
     {
-        var r = Mapping.ParseCsv("x,\"if \"\"%RC%\"\"==\"\"0\"\",y\n");
+        var r = Mapping.ParseCsv("x,\"if \"\"%RC%\"\"==\"\"0\"\"\",y\n");
         Assert.Single(r);
         Assert.Equal(new[] { "x", "if \"%RC%\"==\"0\"", "y" }, r[0]);
     }
