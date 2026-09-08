@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using System.Text;
 using System.Text.RegularExpressions;
 using EnvDTE;
 
@@ -31,23 +32,76 @@ public static class VsAutomation
         var monikers = new IMoniker[1];
         while (e.Next(1, monikers, IntPtr.Zero) == 0)
         {
-            monikers[0].GetDisplayName(ctx, null, out var name);
-            if (ParseMoniker(name) is not { } p) continue;
-            if (rot.GetObject(monikers[0], out var obj) != 0) continue;
-            if (obj is not DTE dte) continue;
-
-            var sln = "(chưa mở solution)";
             try
             {
-                var full = dte.Solution?.FullName;
-                if (!string.IsNullOrEmpty(full)) sln = Path.GetFileName(full);
-            }
-            catch { /* solution đang load */ }
+                monikers[0].GetDisplayName(ctx, null, out var name);
+                if (ParseMoniker(name) is not { } p) continue;
+                if (rot.GetObject(monikers[0], out var obj) != 0) continue;
+                if (obj is not DTE dte) continue;
 
-            list.Add(new VsInstance(p.Version, p.ProcessId, sln, dte));
+                var sln = "(chưa mở solution)";
+                try
+                {
+                    var full = dte.Solution?.FullName;
+                    if (!string.IsNullOrEmpty(full)) sln = Path.GetFileName(full);
+                }
+                catch { /* solution đang load */ }
+
+                list.Add(new VsInstance(p.Version, p.ProcessId, sln, dte));
+            }
+            catch (COMException) { continue; }
         }
         return list;
     }
+
+    public static string GoToLine(DTE dte, string file, int line)
+    {
+        if (!File.Exists(file)) return $"file không tồn tại: {file}";
+        var win = dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView);
+        win.Activate();
+        var sel = (TextSelection)dte.ActiveDocument.Selection;
+        sel.GotoLine(line, false);
+        dte.MainWindow.Activate();
+        return $"đã tới {Path.GetFileName(file)}:{line}";
+    }
+
+    public static string ToggleBreakpoint(DTE dte, string file, int line)
+    {
+        if (!File.Exists(file)) return $"file không tồn tại: {file}";
+        foreach (Breakpoint bp in dte.Debugger.Breakpoints)
+        {
+            if (string.Equals(bp.File, file, StringComparison.OrdinalIgnoreCase) && bp.FileLine == line)
+            {
+                bp.Delete();
+                return $"đã xóa breakpoint tại {Path.GetFileName(file)}:{line}";
+            }
+        }
+        dte.Debugger.Breakpoints.Add("", file, line);
+        return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
+    }
+
+    public static string AddWatch(DTE dte, string expression)
+    {
+        if (string.IsNullOrWhiteSpace(expression)) return "biểu thức trống";
+        SetForegroundWindow(new IntPtr(dte.MainWindow.HWnd));
+        System.Threading.Thread.Sleep(150);
+        dte.ExecuteCommand("Debug.AddWatch");
+        System.Threading.Thread.Sleep(150);
+        SendKeys.SendWait(EscapeSendKeys(expression) + "{ENTER}");
+        return dte.Debugger.CurrentMode == dbgDebugMode.dbgDesignMode
+            ? $"đã gửi \"{expression}\" vào Watch (VS chưa debug — giá trị sẽ hiện khi F5 và dừng ở breakpoint)"
+            : $"đã gửi \"{expression}\" vào Watch";
+    }
+
+    static string EscapeSendKeys(string s)
+    {
+        var sb = new StringBuilder();
+        foreach (var c in s)
+            sb.Append("+^%~(){}[]".Contains(c) ? "{" + c + "}" : c.ToString());
+        return sb.ToString();
+    }
+
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
 
     // ---- COM message filter: tự retry khi VS đang bận ----
     public static class OleMessageFilter
