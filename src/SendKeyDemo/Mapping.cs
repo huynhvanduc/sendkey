@@ -6,6 +6,15 @@ namespace SendKeyDemo;
 
 public record MapRow(string CmdLabel, string CmdVar, string CsharpLabel, string CsharpVar, int SourceLine);
 
+public enum LookupKind { NotFoundLabel, NeedPickVar, Duplicate, Ok }
+
+public record LookupResult(
+    LookupKind Kind,
+    MapRow? Row = null,
+    IReadOnlyList<string>? VarChoices = null,
+    IReadOnlyList<int>? DuplicateLines = null,
+    string? Warning = null);
+
 public class MappingFormatException : Exception
 {
     public int LineNumber { get; }
@@ -85,5 +94,33 @@ public static class Mapping
             result.Add(new MapRow(f[0].Trim(), f[1].Trim(), f[2].Trim(), f[3].Trim(), lineNo));
         }
         return result;
+    }
+
+    public static LookupResult Resolve(IReadOnlyList<MapRow> rows, string cmdLabelRaw, string? cmdVarRaw)
+    {
+        var label = NormalizeLabel(cmdLabelRaw);
+        var inLabel = rows.Where(r => NormalizeLabel(r.CmdLabel) == label).ToList();
+        if (inLabel.Count == 0)
+            return new LookupResult(LookupKind.NotFoundLabel);
+
+        if (string.IsNullOrWhiteSpace(cmdVarRaw))
+        {
+            var csl = inLabel[0].CsharpLabel;
+            var mixed = inLabel.Any(r => r.CsharpLabel != csl);
+            return new LookupResult(LookupKind.Ok, inLabel[0],
+                Warning: mixed
+                    ? $"label \"{cmdLabelRaw.Trim()}\" map tới nhiều csharpLabel; dùng \"{csl}\""
+                    : null);
+        }
+
+        var v = NormalizeVar(cmdVarRaw);
+        var hits = inLabel.Where(r => NormalizeVar(r.CmdVar) == v).ToList();
+        if (hits.Count == 0)
+            return new LookupResult(LookupKind.NeedPickVar,
+                VarChoices: inLabel.Select(r => r.CmdVar).Distinct().ToList());
+        if (hits.Count > 1)
+            return new LookupResult(LookupKind.Duplicate,
+                DuplicateLines: hits.Select(r => r.SourceLine).ToList());
+        return new LookupResult(LookupKind.Ok, hits[0]);
     }
 }
