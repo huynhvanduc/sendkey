@@ -164,4 +164,80 @@ public class MappingTests
         Assert.Equal(LookupKind.Ok, r.Kind);
         Assert.NotNull(r.Warning);
     }
+
+    [Fact]
+    public void FindLabelLine_first_executable_line_after_label()
+    {
+        var src = new[]
+        {
+            "static void Main() {",
+            "    CHECK_INPUT:",
+            "",
+            "        // set rc",
+            "        rc = 0;",
+            "        goto END;",
+        };
+        var r = Mapping.FindLabelLineInText(src, "CHECK_INPUT");
+        Assert.Equal(LabelLineKind.Ok, r.Kind);
+        Assert.Equal(5, r.Line);
+    }
+
+    [Fact]
+    public void FindLabelLine_skips_lone_brace_and_block_comment()
+    {
+        var src = new[] { "  L:", "  {", "  /* a", "     b */", "  DoThing();" };
+        var r = Mapping.FindLabelLineInText(src, "L");
+        Assert.Equal(LabelLineKind.Ok, r.Kind);
+        Assert.Equal(5, r.Line);
+    }
+
+    [Fact]
+    public void FindLabelLine_skips_preprocessor_line()
+    {
+        var src = new[] { "  L:", "#pragma warning restore CS0164", "  rc = 0;" };
+        var r = Mapping.FindLabelLineInText(src, "L");
+        Assert.Equal(LabelLineKind.Ok, r.Kind);
+        Assert.Equal(3, r.Line);
+    }
+
+    [Fact]
+    public void FindLabelLine_statement_on_same_line_as_label()
+    {
+        var r = Mapping.FindLabelLineInText(new[] { "  L: rc = 0;", "  goto END;" }, "L");
+        Assert.Equal(LabelLineKind.Ok, r.Kind);
+        Assert.Equal(1, r.Line);
+    }
+
+    [Fact]
+    public void FindLabelLine_not_found()
+        => Assert.Equal(LabelLineKind.NotFound,
+            Mapping.FindLabelLineInText(new[] { "x", "y" }, "L").Kind);
+
+    [Fact]
+    public void FindLabelLine_multiple_matches()
+    {
+        var r = Mapping.FindLabelLineInText(new[] { "L:", "  a();", "L:", "  b();" }, "L");
+        Assert.Equal(LabelLineKind.Multiple, r.Kind);
+        Assert.Equal(new[] { 1, 3 }, r.MatchLines);
+    }
+
+    [Fact]
+    public void FindLabelLine_no_executable_line_after_label()
+        => Assert.Equal(LabelLineKind.NoExecutableLine,
+            Mapping.FindLabelLineInText(new[] { "  a();", "  L:", "" }, "L").Kind);
+
+    [Fact]
+    public void FindLabelLine_ignores_goto_and_string_occurrences()
+    {
+        var src = new[]
+        {
+            "  goto CHECK_INPUT;",
+            "  Console.WriteLine(\"CHECK_INPUT: hi\");",
+            "  CHECK_INPUT:",
+            "  rc = 1;",
+        };
+        var r = Mapping.FindLabelLineInText(src, "CHECK_INPUT");
+        Assert.Equal(LabelLineKind.Ok, r.Kind);
+        Assert.Equal(4, r.Line);
+    }
 }

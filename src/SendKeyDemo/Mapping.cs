@@ -8,6 +8,10 @@ public record MapRow(string CmdLabel, string CmdVar, string CsharpLabel, string 
 
 public enum LookupKind { NotFoundLabel, NeedPickVar, Duplicate, Ok }
 
+public enum LabelLineKind { NotFound, Multiple, NoExecutableLine, Ok }
+
+public record LabelLineResult(LabelLineKind Kind, int Line = 0, IReadOnlyList<int>? MatchLines = null);
+
 public record LookupResult(
     LookupKind Kind,
     MapRow? Row = null,
@@ -94,6 +98,41 @@ public static class Mapping
             result.Add(new MapRow(f[0].Trim(), f[1].Trim(), f[2].Trim(), f[3].Trim(), lineNo));
         }
         return result;
+    }
+
+    public static LabelLineResult FindLabelLine(string csPath, string csharpLabel)
+        => FindLabelLineInText(File.ReadAllLines(csPath), csharpLabel);
+
+    public static LabelLineResult FindLabelLineInText(IReadOnlyList<string> lines, string csharpLabel)
+    {
+        var rx = new Regex($@"^\s*{Regex.Escape(csharpLabel)}\s*:");
+        var matches = new List<int>();
+        for (int i = 0; i < lines.Count; i++)
+            if (rx.IsMatch(lines[i])) matches.Add(i + 1);
+
+        if (matches.Count == 0) return new LabelLineResult(LabelLineKind.NotFound);
+        if (matches.Count > 1) return new LabelLineResult(LabelLineKind.Multiple, MatchLines: matches);
+
+        int start = matches[0];                       // 1-based dòng nhãn
+        var labelLine = lines[start - 1];
+        int colon = labelLine.IndexOf(':');
+        var tail = colon >= 0 ? labelLine[(colon + 1)..].Trim() : "";
+        if (tail.Length > 0 && !tail.StartsWith("//"))
+            return new LabelLineResult(LabelLineKind.Ok, start);
+
+        bool inBlock = false;
+        for (int ln = start + 1; ln <= lines.Count; ln++)
+        {
+            var t = lines[ln - 1].Trim();
+            if (inBlock) { if (t.Contains("*/")) inBlock = false; continue; }
+            if (t.Length == 0) continue;
+            if (t.StartsWith("//")) continue;
+            if (t.StartsWith("#")) continue;                 // #pragma / #region / #if …
+            if (t.StartsWith("/*")) { if (!t.Contains("*/")) inBlock = true; continue; }
+            if (t == "{") continue;
+            return new LabelLineResult(LabelLineKind.Ok, ln);
+        }
+        return new LabelLineResult(LabelLineKind.NoExecutableLine);
     }
 
     public static LookupResult Resolve(IReadOnlyList<MapRow> rows, string cmdLabelRaw, string? cmdVarRaw)
