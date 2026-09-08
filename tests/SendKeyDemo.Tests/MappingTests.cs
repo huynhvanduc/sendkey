@@ -83,4 +83,20 @@ public class MappingTests
         Assert.Equal("CHECK_INPUT", rows[0].CmdLabel);
         Assert.Equal("rc", rows[0].CsharpVar);
     }
+
+    [Theory]
+    [InlineData(" :CHECK_INPUT ", "check_input")]
+    [InlineData("check_input", "check_input")]
+    [InlineData("CHECK   INPUT", "check input")]
+    [InlineData(": CHECK_INPUT", "check_input")]
+    public void NormalizeLabel_cases(string raw, string expected)
+        => Assert.Equal(expected, Mapping.NormalizeLabel(raw));
+
+    [Theory]
+    [InlineData("%RC%", "%rc%")]
+    [InlineData("  if  %RC%  ", "%rc%")]
+    [InlineData("goto END_PROC", "end_proc")]
+    [InlineData("IF \"%RC%\"==\"0\"", "\"%rc%\"==\"0\"")]
+    public void NormalizeVar_cases(string raw, string expected)
+        => Assert.Equal(expected, Mapping.NormalizeVar(raw));
 }

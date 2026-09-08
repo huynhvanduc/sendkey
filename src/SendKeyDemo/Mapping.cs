@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace SendKeyDemo;
 
@@ -14,6 +15,18 @@ public class MappingFormatException : Exception
 
 public static class Mapping
 {
+    static readonly Regex _ws = new(@"\s+");
+
+    public static string NormalizeLabel(string raw)
+        => _ws.Replace((raw ?? "").Trim(), " ").TrimStart(':').Trim().ToLowerInvariant();
+
+    public static string NormalizeVar(string raw)
+    {
+        var s = _ws.Replace((raw ?? "").Trim(), " ");
+        s = Regex.Replace(s, @"^(if|goto)\s+", "", RegexOptions.IgnoreCase);
+        return s.Trim().ToLowerInvariant();
+    }
+
     /// <summary>Tách CSV theo RFC 4180. Không dùng Split(',').</summary>
     public static List<string[]> ParseCsv(string text)
     {
