@@ -9,6 +9,15 @@
 **Tech Stack:** .NET 8, WinForms (`net8.0-windows`), NuGet `envdte`, P/Invoke `ole32.dll` / `user32.dll`.
 
 > **Cập nhật 2026-09-08:** Người dùng yêu cầu KHÔNG tạo project test. Bỏ toàn bộ phần xUnit; `ParseMoniker` được thêm thẳng (không qua TDD) và kiểm bằng mắt + build.
+>
+> **Sửa sau review tổng (commit `3629226`):**
+> - `AddWatch`: check `Debugger.CurrentMode == dbgDesignMode` và return sớm TRƯỚC `ExecuteCommand("Debug.AddWatch")` (lệnh này ném lỗi ngoài phiên debug). Bỏ ternary cuối hàm.
+> - `MainForm.Run`: bắt VS đã đóng bằng `COMException` HResult `0x800706BA / 0x80010108 / 0x800401FD` (kèm `InvalidComObjectException`), không chỉ mình `InvalidComObjectException`.
+> - `GoToLine`: điều hướng `win.Document.Selection` (không phải `dte.ActiveDocument`); so `sel.CurrentLine` sau `GotoLine` để báo khi line bị kẹp.
+> - `LoadInstances`: set `_instances.SelectedIndex = 0` cả nhánh không có instance để sentinel hiển thị.
+> - `OleMessageFilter.RetryRejectedCall`: chỉ retry `RETRYLATER` (2); `REJECTED` (1) hủy luôn.
+> - `README.md`: thêm ghi chú UIPI — VS chạy admin mà app không thì `SetForegroundWindow`/`SendKeys` bị chặn.
+> - Xóa thư mục `tests/` còn sót; thêm newline cuối `Program.cs` + `SendKeyDemo.csproj`.
 
 ## Global Constraints
 
