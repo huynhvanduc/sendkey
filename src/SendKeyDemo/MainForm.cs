@@ -92,7 +92,10 @@ public class MainForm : Form
         if (any)
             _instances.SelectedIndex = 0;
         else
+        {
             _instances.Items.Add("(không có instance VS đang chạy)");
+            _instances.SelectedIndex = 0;
+        }
 
         _goto.Enabled = _bp.Enabled = _addWatch.Enabled = any;
         Log(any ? $"Tìm thấy {_instances.Items.Count} instance VS." : "Không tìm thấy VS nào đang chạy.");
@@ -109,7 +112,8 @@ public class MainForm : Form
         {
             Log($"{label}: {action(vs.Dte)}");
         }
-        catch (InvalidComObjectException)
+        catch (Exception ex) when (ex is InvalidComObjectException ||
+            (ex is COMException ce && (uint)ce.HResult is 0x800706BA or 0x80010108 or 0x800401FD))
         {
             Log($"{label}: instance đã đóng — bấm Refresh.");
         }

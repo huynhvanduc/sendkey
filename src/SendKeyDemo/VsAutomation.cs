@@ -59,10 +59,13 @@ public static class VsAutomation
         if (!File.Exists(file)) return $"file không tồn tại: {file}";
         var win = dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView);
         win.Activate();
-        var sel = (TextSelection)dte.ActiveDocument.Selection;
+        var sel = (TextSelection)win.Document.Selection;
         sel.GotoLine(line, false);
+        var reached = sel.CurrentLine;
         dte.MainWindow.Activate();
-        return $"đã tới {Path.GetFileName(file)}:{line}";
+        return reached == line
+            ? $"đã tới {Path.GetFileName(file)}:{line}"
+            : $"đã tới {Path.GetFileName(file)}:{reached} (file chỉ có {reached} dòng)";
     }
 
     public static string ToggleBreakpoint(DTE dte, string file, int line)
@@ -83,14 +86,14 @@ public static class VsAutomation
     public static string AddWatch(DTE dte, string expression)
     {
         if (string.IsNullOrWhiteSpace(expression)) return "biểu thức trống";
+        if (dte.Debugger.CurrentMode == dbgDebugMode.dbgDesignMode)
+            return "VS chưa debug — F5 và dừng ở breakpoint rồi Add Watch.";
         SetForegroundWindow(new IntPtr(dte.MainWindow.HWnd));
         System.Threading.Thread.Sleep(150);
         dte.ExecuteCommand("Debug.AddWatch");
         System.Threading.Thread.Sleep(150);
         SendKeys.SendWait(EscapeSendKeys(expression) + "{ENTER}");
-        return dte.Debugger.CurrentMode == dbgDebugMode.dbgDesignMode
-            ? $"đã gửi \"{expression}\" vào Watch (VS chưa debug — giá trị sẽ hiện khi F5 và dừng ở breakpoint)"
-            : $"đã gửi \"{expression}\" vào Watch";
+        return $"đã gửi \"{expression}\" vào Watch";
     }
 
     static string EscapeSendKeys(string s)
@@ -116,9 +119,9 @@ public static class VsAutomation
             // SERVERCALL_ISHANDLED
             public int HandleInComingCall(int callType, IntPtr caller, int tickCount, IntPtr info) => 0;
 
-            // rejectType: 1 = SERVERCALL_REJECTED, 2 = SERVERCALL_RETRYLATER
+            // chỉ RETRYLATER (2) mới retry được; REJECTED (1) thì hủy luôn
             public int RetryRejectedCall(IntPtr callee, int tickCount, int rejectType)
-                => (rejectType is 1 or 2) && tickCount < 10_000 ? 100 : -1;
+                => rejectType == 2 && tickCount < 10_000 ? 100 : -1;
 
             // PENDINGMSG_WAITDEFPROCESS
             public int MessagePending(IntPtr callee, int tickCount, int pendingType) => 2;

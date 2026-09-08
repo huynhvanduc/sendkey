@@ -38,3 +38,4 @@ Yêu cầu: Windows, .NET 8 SDK, có Visual Studio 2022/2026 đang mở sẵn m�
 - App build x64 để khớp tiến trình 64-bit của VS.
 - Nếu VS đang bận (đang build/gỡ lỗi), lời gọi tự động retry tối đa ~10 giây.
 - Add Watch cần cửa sổ VS lên foreground trong ~0,3s; đừng thao tác chuột/bàn phím lúc đó.
+- Nếu Visual Studio chạy với quyền Administrator mà app demo thì không, Windows (UIPI) sẽ chặn `SetForegroundWindow` và `SendKeys` — Add Watch sẽ "im lặng không tác dụng". Chạy cả hai cùng mức quyền.
