@@ -4,13 +4,15 @@
 
 **Goal:** App WinForms .NET 8 điều khiển Visual Studio 2022/2026 đang chạy (qua EnvDTE + SendKeys) để Go To Line, Toggle Breakpoint theo file+line, và Add Watch một biểu thức.
 
-**Architecture:** Một form duy nhất dựng bằng code. Toàn bộ COM interop (quét Running Object Table, thao tác DTE, message filter, SendKeys) gộp trong `VsAutomation.cs`. Kèm project console `SampleTarget` để mở trong VS mà debug, và một project xUnit chỉ test hàm parse moniker (logic thuần).
+**Architecture:** Một form duy nhất dựng bằng code. Toàn bộ COM interop (quét Running Object Table, thao tác DTE, message filter, SendKeys) gộp trong `VsAutomation.cs`. Kèm project console `SampleTarget` để mở trong VS mà debug.
 
-**Tech Stack:** .NET 8, WinForms (`net8.0-windows`), NuGet `envdte`, xUnit, P/Invoke `ole32.dll` / `user32.dll`.
+**Tech Stack:** .NET 8, WinForms (`net8.0-windows`), NuGet `envdte`, P/Invoke `ole32.dll` / `user32.dll`.
+
+> **Cập nhật 2026-09-08:** Người dùng yêu cầu KHÔNG tạo project test. Bỏ toàn bộ phần xUnit; `ParseMoniker` được thêm thẳng (không qua TDD) và kiểm bằng mắt + build.
 
 ## Global Constraints
 
-- Mọi project target `.NET 8`. `SendKeyDemo` và `SendKeyDemo.Tests` dùng `net8.0-windows`; `SampleTarget` dùng `net8.0`.
+- Chỉ 2 project. `SendKeyDemo` dùng `net8.0-windows`; `SampleTarget` dùng `net8.0`. Không có project test.
 - `SendKeyDemo`: `OutputType=WinExe`, `UseWindowsForms=true`, `Nullable=enable`, `ImplicitUsings=enable`, `PlatformTarget=x64`, `NoWarn=NU1701`.
 - Ưu tiên ít file / ít dòng. Không thêm interface, DI, abstraction ngoài những gì plan này liệt kê. Không tạo file `.Designer.cs`.
 - Chuỗi hiển thị cho người dùng (log, nút, nhãn) bằng tiếng Việt như trong code mẫu.
@@ -22,7 +24,7 @@
 
 | File | Trách nhiệm |
 |---|---|
-| `SendKeyDemo.sln` | Gom 3 project |
+| `SendKeyDemo.sln` | Gom 2 project |
 | `.gitignore` | Bỏ qua `bin/`, `obj/`, `.vs/` |
 | `src/SendKeyDemo/SendKeyDemo.csproj` | Project app, tham chiếu `envdte` |
 | `src/SendKeyDemo/Program.cs` | Entry point `[STAThread]` |
@@ -30,38 +32,39 @@
 | `src/SendKeyDemo/MainForm.cs` | UI dựng bằng code + xử lý sự kiện |
 | `samples/SampleTarget/SampleTarget.csproj` | Console net8.0 |
 | `samples/SampleTarget/Program.cs` | Vòng lặp + biến cục bộ để debug |
-| `tests/SendKeyDemo.Tests/SendKeyDemo.Tests.csproj` | xUnit, tham chiếu `SendKeyDemo` |
-| `tests/SendKeyDemo.Tests/MonikerParseTests.cs` | Test `ParseMoniker` |
 | `README.md` | Cách chạy + checklist test thủ công |
 
 ---
 
-## Task 1: Scaffold solution, 3 project, SampleTarget chạy được
+## Task 1: Scaffold solution, 2 project, SampleTarget chạy được
 
 **Files:**
-- Create: `SendKeyDemo.sln`, `.gitignore`
+- Create: `SendKeyDemo.sln`, `.gitignore`, `global.json`
 - Create: `src/SendKeyDemo/SendKeyDemo.csproj`, `src/SendKeyDemo/Program.cs`, `src/SendKeyDemo/MainForm.cs`
 - Create: `samples/SampleTarget/SampleTarget.csproj`, `samples/SampleTarget/Program.cs`
-- Create: `tests/SendKeyDemo.Tests/SendKeyDemo.Tests.csproj`
 
 **Interfaces:**
 - Consumes: —
 - Produces: namespace `SendKeyDemo`; class `MainForm : Form` (ctor rỗng tham số); `Program.Main`.
 
-- [ ] **Step 1: Tạo 3 project + solution + gitignore**
+- [ ] **Step 1: Tạo 2 project + solution + gitignore**
 
-Chạy từ `D:\LearnCode\sendkey`:
+Chạy từ `D:\LearnCode\sendkey`. Tạo `global.json` (pin SDK 8) trước khi `dotnet new`:
+
+```json
+{ "sdk": { "version": "8.0.401", "rollForward": "latestFeature" } }
+```
 
 ```bash
 dotnet new gitignore
 dotnet new winforms -o src/SendKeyDemo -n SendKeyDemo
 dotnet new console  -o samples/SampleTarget -n SampleTarget
-dotnet new xunit    -o tests/SendKeyDemo.Tests -n SendKeyDemo.Tests
 dotnet new sln -n SendKeyDemo
-dotnet sln add src/SendKeyDemo samples/SampleTarget tests/SendKeyDemo.Tests
-dotnet add tests/SendKeyDemo.Tests reference src/SendKeyDemo
+dotnet sln add src/SendKeyDemo samples/SampleTarget
 dotnet add src/SendKeyDemo package envdte
 ```
+
+Thêm dòng `.superpowers/` vào `.gitignore` để thư mục scratch SDD không bị commit.
 
 - [ ] **Step 2: Ghi đè `src/SendKeyDemo/SendKeyDemo.csproj`**
 
@@ -119,7 +122,7 @@ public class MainForm : Form
 
 - [ ] **Step 5: Xóa file thừa do template sinh ra**
 
-Xóa nếu tồn tại: `src/SendKeyDemo/Form1.cs`, `src/SendKeyDemo/Form1.Designer.cs`, `src/SendKeyDemo/Form1.resx`, `tests/SendKeyDemo.Tests/UnitTest1.cs`.
+Xóa nếu tồn tại: `src/SendKeyDemo/Form1.cs`, `src/SendKeyDemo/Form1.Designer.cs`, `src/SendKeyDemo/Form1.resx`.
 
 - [ ] **Step 6: Ghi đè `samples/SampleTarget/Program.cs`**
 
@@ -149,59 +152,23 @@ Expected: in ra `SampleTarget khởi động...` rồi `iteration 0: counter=0`,
 
 ```bash
 git add -A
-git commit -m "chore: scaffold solution, sample target, test project"
+git commit -m "chore: scaffold solution and sample target"
 ```
 
 ---
 
-## Task 2: `ParseMoniker` (TDD)
+## Task 2: `ParseMoniker` — tạo `VsAutomation.cs`
 
 **Files:**
 - Create: `src/SendKeyDemo/VsAutomation.cs`
-- Modify: `tests/SendKeyDemo.Tests/MonikerParseTests.cs` (tạo mới, thay `UnitTest1.cs` đã xóa)
 
 **Interfaces:**
 - Consumes: —
 - Produces: `public static (string Version, int ProcessId)? SendKeyDemo.VsAutomation.ParseMoniker(string? displayName)` — trả tuple khi tên khớp `!VisualStudio.DTE.<major>.<minor>:<pid>`, ngược lại `null`.
 
-- [ ] **Step 1: Viết test thất bại — `tests/SendKeyDemo.Tests/MonikerParseTests.cs`**
+Không có project test (theo yêu cầu người dùng). Kiểm bằng build + đọc lại logic.
 
-```csharp
-using SendKeyDemo;
-using Xunit;
-
-public class MonikerParseTests
-{
-    [Theory]
-    [InlineData("!VisualStudio.DTE.17.0:12345", "17.0", 12345)]
-    [InlineData("!VisualStudio.DTE.18.0:9", "18.0", 9)]
-    public void Parses_valid_moniker(string input, string version, int pid)
-    {
-        var r = VsAutomation.ParseMoniker(input);
-        Assert.NotNull(r);
-        Assert.Equal(version, r!.Value.Version);
-        Assert.Equal(pid, r.Value.ProcessId);
-    }
-
-    [Theory]
-    [InlineData("!VisualStudio.DTE")]
-    [InlineData("!VisualStudio.DTE.17.0")]
-    [InlineData("")]
-    [InlineData("random string")]
-    [InlineData("!VisualStudio.DTE.17.0:notanumber")]
-    public void Rejects_invalid_moniker(string input)
-    {
-        Assert.Null(VsAutomation.ParseMoniker(input));
-    }
-}
-```
-
-- [ ] **Step 2: Chạy test để xác nhận fail**
-
-Run: `dotnet test tests/SendKeyDemo.Tests`
-Expected: FAIL — lỗi biên dịch `'VsAutomation' does not exist` (chưa có type).
-
-- [ ] **Step 3: Tạo `src/SendKeyDemo/VsAutomation.cs` với đủ hàm `ParseMoniker`**
+- [ ] **Step 1: Tạo `src/SendKeyDemo/VsAutomation.cs`**
 
 ```csharp
 using System.Text.RegularExpressions;
@@ -218,15 +185,21 @@ public static class VsAutomation
 }
 ```
 
-- [ ] **Step 4: Chạy test để xác nhận pass**
+- [ ] **Step 2: Build**
 
-Run: `dotnet test tests/SendKeyDemo.Tests`
-Expected: PASS — 7 test passed.
+Run: `dotnet build SendKeyDemo.sln`
+Expected: `Build succeeded`, 0 error, 0 warning (ngoài NU1701 đã chặn).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Kiểm logic bằng mắt**
+
+Xác nhận: `"!VisualStudio.DTE.17.0:12345"` → `("17.0", 12345)`; `"!VisualStudio.DTE.18.0:9"` → `("18.0", 9)`;
+`"!VisualStudio.DTE"`, `""`, `"random"`, `"!VisualStudio.DTE.17.0"`, `"!VisualStudio.DTE.17.0:notanumber"` → `null`
+(regex neo `^...$`, nhóm pid là `\d+` nên "notanumber" không khớp).
+
+- [ ] **Step 4: Commit**
 
 ```bash
-git add src/SendKeyDemo/VsAutomation.cs tests/SendKeyDemo.Tests/MonikerParseTests.cs
+git add src/SendKeyDemo/VsAutomation.cs
 git commit -m "feat: parse VisualStudio.DTE moniker into version + pid"
 ```
 
@@ -331,10 +304,10 @@ public static class VsAutomation
 }
 ```
 
-- [ ] **Step 2: Build + chạy lại test parse (không được hồi quy)**
+- [ ] **Step 2: Build**
 
-Run: `dotnet build SendKeyDemo.sln && dotnet test tests/SendKeyDemo.Tests`
-Expected: `Build succeeded`; 7 test vẫn PASS.
+Run: `dotnet build SendKeyDemo.sln`
+Expected: `Build succeeded`; `ParseMoniker` giữ nguyên logic (không hồi quy).
 
 - [ ] **Step 3: Commit**
 
@@ -643,10 +616,10 @@ Yêu cầu: Windows, .NET 8 SDK, có Visual Studio 2022/2026 đang mở sẵn m�
 - Add Watch cần cửa sổ VS lên foreground trong ~0,3s; đừng thao tác chuột/bàn phím lúc đó.
 ```
 
-- [ ] **Step 2: Xác minh build + test toàn bộ lần cuối**
+- [ ] **Step 2: Xác minh build toàn bộ lần cuối**
 
-Run: `dotnet build SendKeyDemo.sln && dotnet test SendKeyDemo.sln`
-Expected: `Build succeeded`; `Passed! - Failed: 0` (7 test).
+Run: `dotnet build SendKeyDemo.sln -c Release`
+Expected: `Build succeeded`, 0 error, 0 warning (ngoài NU1701 đã chặn).
 
 - [ ] **Step 3: Kiểm thử thủ công với Visual Studio**
 
@@ -663,6 +636,6 @@ git commit -m "docs: README with usage and manual test checklist"
 
 ## Self-Review Notes
 
-- **Spec coverage:** Go To Line → Task 4/5; Toggle Breakpoint theo file+line → Task 4/5; Add Watch (DTE + SendKeys) → Task 4/5; chọn instance qua dropdown + Refresh → Task 5; quét ROT không dùng `Marshal.GetActiveObject` → Task 3; `OleMessageFilter` retry VS bận → Task 3/5; build x64 + `NoWarn NU1701` → Task 1 (csproj) + Global Constraints; SampleTarget console → Task 1; test `ParseMoniker` (4+ case rác) → Task 2; các mục xử lý lỗi trong spec (file sai, line quá lớn do `GotoLine` tự kẹp, chưa break mode, instance đóng, COMException) → `GoToLine`/`ToggleBreakpoint`/`AddWatch`/`Run` trong Task 4–5. Không còn mục spec nào thiếu task.
+- **Spec coverage:** Go To Line → Task 4/5; Toggle Breakpoint theo file+line → Task 4/5; Add Watch (DTE + SendKeys) → Task 4/5; chọn instance qua dropdown + Refresh → Task 5; quét ROT không dùng `Marshal.GetActiveObject` → Task 3; `OleMessageFilter` retry VS bận → Task 3/5; build x64 + `NoWarn NU1701` → Task 1 (csproj) + Global Constraints; SampleTarget console → Task 1; `ParseMoniker` → Task 2 (không có project test theo yêu cầu người dùng — kiểm bằng mắt + build); các mục xử lý lỗi trong spec (file sai, line quá lớn do `GotoLine` tự kẹp, chưa break mode, instance đóng, COMException) → `GoToLine`/`ToggleBreakpoint`/`AddWatch`/`Run` trong Task 4–5. Không còn mục spec nào thiếu task.
 - **Placeholder scan:** `MainForm.cs` ở Task 1 là bản tối thiểu có chủ đích, được thay toàn bộ ở Task 5 Step 1 (không phải placeholder treo).
 - **Type consistency:** `ParseMoniker` trả `(string Version, int ProcessId)?` — dùng nhất quán ở Task 2 test và Task 3 (`p.Version`, `p.ProcessId`). `VsInstance.Dte` kiểu `EnvDTE.DTE` — khớp chữ ký `Func<DTE,string>` ở `MainForm.Run` và 3 method trong Task 4. Tên method `GoToLine` / `ToggleBreakpoint` / `AddWatch` đồng nhất giữa Task 4 và Task 5.
