@@ -253,20 +253,24 @@ public static class VsAutomation
         var monikers = new IMoniker[1];
         while (e.Next(1, monikers, IntPtr.Zero) == 0)
         {
-            monikers[0].GetDisplayName(ctx, null, out var name);
-            if (ParseMoniker(name) is not { } p) continue;
-            if (rot.GetObject(monikers[0], out var obj) != 0) continue;
-            if (obj is not DTE dte) continue;
-
-            var sln = "(chưa mở solution)";
             try
             {
-                var full = dte.Solution?.FullName;
-                if (!string.IsNullOrEmpty(full)) sln = Path.GetFileName(full);
-            }
-            catch { /* solution đang load */ }
+                monikers[0].GetDisplayName(ctx, null, out var name);
+                if (ParseMoniker(name) is not { } p) continue;
+                if (rot.GetObject(monikers[0], out var obj) != 0) continue;
+                if (obj is not DTE dte) continue;
 
-            list.Add(new VsInstance(p.Version, p.ProcessId, sln, dte));
+                var sln = "(chưa mở solution)";
+                try
+                {
+                    var full = dte.Solution?.FullName;
+                    if (!string.IsNullOrEmpty(full)) sln = Path.GetFileName(full);
+                }
+                catch { /* solution đang load */ }
+
+                list.Add(new VsInstance(p.Version, p.ProcessId, sln, dte));
+            }
+            catch (COMException) { continue; }   // 1 instance VS đang bận không được che các instance khác
         }
         return list;
     }
@@ -371,9 +375,9 @@ public static string AddWatch(DTE dte, string expression)
 {
     if (string.IsNullOrWhiteSpace(expression)) return "biểu thức trống";
     SetForegroundWindow(new IntPtr(dte.MainWindow.HWnd));
-    Thread.Sleep(150);
+    System.Threading.Thread.Sleep(150);   // fully-qualified: `using EnvDTE;` làm `Thread` mơ hồ (EnvDTE.Thread)
     dte.ExecuteCommand("Debug.AddWatch");
-    Thread.Sleep(150);
+    System.Threading.Thread.Sleep(150);
     SendKeys.SendWait(EscapeSendKeys(expression) + "{ENTER}");
     return dte.Debugger.CurrentMode == dbgDebugMode.dbgDesignMode
         ? $"đã gửi \"{expression}\" vào Watch (VS chưa debug — giá trị sẽ hiện khi F5 và dừng ở breakpoint)"
