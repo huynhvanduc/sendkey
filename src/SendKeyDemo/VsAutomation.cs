@@ -79,15 +79,24 @@ public static class VsAutomation
                 return $"đã xóa breakpoint tại {Path.GetFileName(file)}:{line}";
             }
         }
-        dte.Debugger.Breakpoints.Add("", file, line);
+        try
+        {
+            dte.Debugger.Breakpoints.Add("", file, line);
+        }
+        catch (COMException)
+        {
+            return $"không đặt được breakpoint tại {Path.GetFileName(file)}:{line} — dòng phải là lệnh " +
+                   "thực thi (không phải dòng trống / comment / using / khai báo), và file phải thuộc " +
+                   "solution đang mở trong VS.";
+        }
         return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
     }
 
     public static string AddWatch(DTE dte, string expression)
     {
         if (string.IsNullOrWhiteSpace(expression)) return "biểu thức trống";
-        if (dte.Debugger.CurrentMode == dbgDebugMode.dbgDesignMode)
-            return "VS chưa debug — F5 và dừng ở breakpoint rồi Add Watch.";
+        if (dte.Debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
+            return "Chưa ở break mode — F5 chạy chương trình và để nó DỪNG lại ở breakpoint, rồi mới Add Watch.";
         SetForegroundWindow(new IntPtr(dte.MainWindow.HWnd));
         System.Threading.Thread.Sleep(150);
         dte.ExecuteCommand("Debug.AddWatch");
