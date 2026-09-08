@@ -1,16 +1,7 @@
 cmdLabel,cmdVar,csharpLabel,csharpVar
-MAIN,%ERRORLEVEL%,Main,exitCode
-INIT_CONFIG,%CONFIG_PATH%,InitConfig,configPath
-INIT_CONFIG,%RETRY_MAX%,InitConfig,retryMax
-CHECK_INPUT,%INPUT_FILE%,CheckInput,inputFile
-CHECK_INPUT,%RC%,CheckInput,rc
-READ_RECORD,%REC%,ReadRecord,record
-READ_RECORD,%LINE_CNT%,ReadRecord,lineCount
-VALIDATE_DATE,%IN_DATE%,ValidateDate,inputDate
-VALIDATE_DATE,%RC%,ValidateDate,rc
-CALC_AMOUNT,%QTY%,CalcAmount,quantity
-CALC_AMOUNT,%UNIT_PRICE%,CalcAmount,unitPrice
-CALC_AMOUNT,%TOTAL%,CalcAmount,total
-WRITE_LOG,%LOG_PATH%,WriteLog,logPath
-WRITE_LOG,%MSG%,WriteLog,message
-END_PROC,%RC%,EndProc,rc
+CHECK_INPUT,%INPUT_FILE%,CHECK_INPUT,inputFile
+CHECK_INPUT,%RC%,CHECK_INPUT,rc
+CHECK_INPUT,"if ""%RC%"" NEQ ""0""",CHECK_INPUT,rc != 0
+VALIDATE_DATE,%IN_DATE%,VALIDATE_DATE,inDate
+VALIDATE_DATE,%RC%,VALIDATE_DATE,rc
+END_PROC,%RC%,END_PROC,rc
