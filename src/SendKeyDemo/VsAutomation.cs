@@ -92,6 +92,26 @@ public static class VsAutomation
         return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
     }
 
+    public static string EnsureBreakpoint(DTE dte, string file, int line)
+    {
+        if (!File.Exists(file)) return $"file không tồn tại: {file}";
+        foreach (Breakpoint bp in dte.Debugger.Breakpoints)
+        {
+            if (string.Equals(bp.File, file, StringComparison.OrdinalIgnoreCase) && bp.FileLine == line)
+                return $"breakpoint đã có tại {Path.GetFileName(file)}:{line}";
+        }
+        try
+        {
+            dte.Debugger.Breakpoints.Add("", file, line);
+        }
+        catch (COMException)
+        {
+            return $"không đặt được breakpoint tại {Path.GetFileName(file)}:{line} — dòng phải là lệnh " +
+                   "thực thi (không phải dòng trống / comment / khai báo), và file phải thuộc solution đang mở.";
+        }
+        return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
+    }
+
     public static string AddWatch(DTE dte, string expression)
     {
         if (string.IsNullOrWhiteSpace(expression)) return "biểu thức trống";
