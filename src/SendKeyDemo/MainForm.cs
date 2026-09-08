@@ -30,6 +30,9 @@ public class MainForm : Form
     readonly Button _run = new() { Text = "Tra & Chạy", AutoSize = true };
     readonly CheckBox _topMostBox = new() { Text = "Luôn nổi trên cùng", AutoSize = true, Checked = true };
     bool _loading;
+    List<MapRow>? _mapRows;
+    string _mapRowsPath = "";
+    DateTime _mapRowsMtime;
 
     public MainForm()
     {
@@ -159,8 +162,147 @@ public class MainForm : Form
         if (d.ShowDialog(this) == DialogResult.OK) target.Text = d.FileName;
     }
 
-    // Task 10 cài đặt thật.
-    void TraVaChay() => Log("Tra & Chạy: (được cài đặt ở Task 10)");
+    List<MapRow>? GetMapRows()
+    {
+        var path = _mappingPath.Text.Trim();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            Log($"Tra & Chạy: không thấy mapping.csv: {path}");
+            return null;
+        }
+        var mtime = File.GetLastWriteTimeUtc(path);
+        if (_mapRows != null && _mapRowsPath == path && _mapRowsMtime == mtime)
+            return _mapRows;
+        try
+        {
+            _mapRows = Mapping.Load(path);
+            _mapRowsPath = path;
+            _mapRowsMtime = mtime;
+            Log($"Đã nạp mapping.csv: {_mapRows.Count} dòng.");
+            return _mapRows;
+        }
+        catch (MappingFormatException ex)
+        {
+            Log("Tra & Chạy: " + ex.Message);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Log("Tra & Chạy: lỗi đọc mapping.csv — " + ex.Message);
+            return null;
+        }
+    }
+
+    static string? PickFromList(string title, IReadOnlyList<string> items)
+    {
+        using var dlg = new Form
+        {
+            Text = title, Width = 440, Height = 320,
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MinimizeBox = false, MaximizeBox = false, TopMost = true
+        };
+        var list = new ListBox { Dock = DockStyle.Fill };
+        foreach (var it in items) list.Items.Add(it);
+        if (list.Items.Count > 0) list.SelectedIndex = 0;
+        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Dock = DockStyle.Bottom, Height = 32 };
+        list.DoubleClick += (_, _) => { if (list.SelectedItem != null) ok.PerformClick(); };
+        dlg.Controls.Add(list);
+        dlg.Controls.Add(ok);
+        dlg.AcceptButton = ok;
+        return dlg.ShowDialog() == DialogResult.OK ? list.SelectedItem as string : null;
+    }
+
+    void TraVaChay()
+    {
+        if (_instances.SelectedItem is not VsInstance)
+        {
+            Log("Tra & Chạy: chưa chọn instance VS.");
+            return;
+        }
+
+        var rows = GetMapRows();
+        if (rows == null) return;
+
+        var csPath = _targetCs.Text.Trim();
+        if (string.IsNullOrWhiteSpace(csPath) || !File.Exists(csPath))
+        {
+            Log($"Tra & Chạy: không thấy file .cs đích: {csPath}");
+            return;
+        }
+
+        var labelRaw = _cmdLabel.Text.Trim();
+        if (labelRaw.Length == 0)
+        {
+            Log("Tra & Chạy: chưa nhập cmdLabel.");
+            return;
+        }
+        var varRaw = _cmdVar.Text.Trim();
+        bool labelOnly = varRaw.Length == 0;
+
+        var res = Mapping.Resolve(rows, labelRaw, labelOnly ? null : varRaw);
+
+        if (res.Kind == LookupKind.NotFoundLabel)
+        {
+            Log($"Tra & Chạy: không thấy label \"{labelRaw}\" trong mapping.csv.");
+            return;
+        }
+        if (res.Kind == LookupKind.Duplicate)
+        {
+            Log($"Tra & Chạy: mapping trùng dòng {string.Join(", ", res.DuplicateLines!)}.");
+            return;
+        }
+        if (res.Kind == LookupKind.NeedPickVar)
+        {
+            var pick = PickFromList($"Chọn biến của label {labelRaw}", res.VarChoices!);
+            if (pick == null)
+            {
+                Log("Tra & Chạy: đã hủy chọn biến.");
+                return;
+            }
+            _cmdVar.Text = pick;
+            varRaw = pick;
+            labelOnly = false;
+            res = Mapping.Resolve(rows, labelRaw, pick);
+            if (res.Kind != LookupKind.Ok)
+            {
+                Log("Tra & Chạy: vẫn không khớp sau khi chọn biến.");
+                return;
+            }
+        }
+
+        var row = res.Row!;
+        if (res.Warning != null) Log("Tra & Chạy: " + res.Warning);
+
+        var lineRes = Mapping.FindLabelLine(csPath, row.CsharpLabel);
+        if (lineRes.Kind == LabelLineKind.NotFound)
+        {
+            Log($"Tra & Chạy: không thấy label \"{row.CsharpLabel}:\" trong {Path.GetFileName(csPath)}.");
+            return;
+        }
+        if (lineRes.Kind == LabelLineKind.Multiple)
+        {
+            Log($"Tra & Chạy: label \"{row.CsharpLabel}:\" xuất hiện ở dòng {string.Join(", ", lineRes.MatchLines!)}.");
+            return;
+        }
+        if (lineRes.Kind == LabelLineKind.NoExecutableLine)
+        {
+            Log($"Tra & Chạy: sau label \"{row.CsharpLabel}\" không còn dòng thực thi.");
+            return;
+        }
+        int line = lineRes.Line;
+
+        _file.Text = csPath;
+        _line.Value = Math.Min(line, (int)_line.Maximum);
+        if (!labelOnly) _watch.Text = row.CsharpVar;
+
+        Run("Go To Line", dte => VsAutomation.GoToLine(dte, csPath, line));
+        Run("Breakpoint", dte => VsAutomation.EnsureBreakpoint(dte, csPath, line));
+
+        Log(labelOnly
+            ? $"mapping: {labelRaw} → {Path.GetFileName(csPath)}:{line} — breakpoint sẵn sàng (F5 để dừng lại)."
+            : $"mapping: {labelRaw}/{_cmdVar.Text} → {Path.GetFileName(csPath)}:{line}, watch \"{row.CsharpVar}\" — F5 dừng ở breakpoint rồi bấm Add Watch.");
+    }
 
     void LoadInstances()
     {
