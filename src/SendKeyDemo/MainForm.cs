@@ -20,15 +20,45 @@ public class MainForm : Form
         ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 9f)
     };
 
+    // --- mapping mode ---
+    readonly TextBox _mappingPath = new() { Dock = DockStyle.Fill };
+    readonly Button _mappingBrowse = new() { Text = "Browse...", AutoSize = true };
+    readonly TextBox _targetCs = new() { Dock = DockStyle.Fill };
+    readonly Button _targetBrowse = new() { Text = "Browse...", AutoSize = true };
+    readonly TextBox _cmdLabel = new() { Dock = DockStyle.Fill };
+    readonly TextBox _cmdVar = new() { Dock = DockStyle.Fill };
+    readonly Button _run = new() { Text = "Tra & Chạy", AutoSize = true };
+    readonly CheckBox _topMostBox = new() { Text = "Luôn nổi trên cùng", AutoSize = true, Checked = true };
+    bool _loading;
+
     public MainForm()
     {
         Text = "VS SendKey Automation Demo";
-        Width = 760;
-        Height = 520;
+        Width = 780;
+        Height = 620;
 
         var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8, 8, 8, 0) };
         top.Controls.Add(_instances);
         top.Controls.Add(_refresh);
+
+        var mapGrid = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top, ColumnCount = 3, RowCount = 5, AutoSize = true, Padding = new Padding(8, 4, 8, 4)
+        };
+        mapGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
+        mapGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        mapGrid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        mapGrid.Controls.Add(new Label { Text = "mapping.csv", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
+        mapGrid.Controls.Add(_mappingPath, 1, 0);
+        mapGrid.Controls.Add(_mappingBrowse, 2, 0);
+        mapGrid.Controls.Add(new Label { Text = "target .cs", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
+        mapGrid.Controls.Add(_targetCs, 1, 1);
+        mapGrid.Controls.Add(_targetBrowse, 2, 1);
+        mapGrid.Controls.Add(new Label { Text = "cmdLabel", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
+        mapGrid.Controls.Add(_cmdLabel, 1, 2);
+        mapGrid.Controls.Add(new Label { Text = "cmdVar", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
+        mapGrid.Controls.Add(_cmdVar, 1, 3);
+        mapGrid.Controls.Add(_run, 1, 4);
 
         var grid = new TableLayoutPanel
         {
@@ -50,12 +80,17 @@ public class MainForm : Form
         buttons.Controls.Add(_bp);
         buttons.Controls.Add(_addWatch);
 
+        var bottomPanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(8, 0, 8, 4) };
+        bottomPanel.Controls.Add(_topMostBox);
+
         var logHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8) };
         logHost.Controls.Add(_log);
 
         Controls.Add(logHost);
+        Controls.Add(bottomPanel);
         Controls.Add(buttons);
         Controls.Add(grid);
+        Controls.Add(mapGrid);
         Controls.Add(top);
 
         _refresh.Click += (_, _) => LoadInstances();
@@ -68,12 +103,64 @@ public class MainForm : Form
         _bp.Click += (_, _) => Run("Toggle Breakpoint", dte => VsAutomation.ToggleBreakpoint(dte, _file.Text, (int)_line.Value));
         _addWatch.Click += (_, _) => Run("Add Watch", dte => VsAutomation.AddWatch(dte, _watch.Text));
 
+        _mappingBrowse.Click += (_, _) => PickFile(_mappingPath, "CSV (*.csv)|*.csv|Tất cả (*.*)|*.*");
+        _targetBrowse.Click += (_, _) => PickFile(_targetCs, "C# (*.cs)|*.cs|Tất cả (*.*)|*.*");
+        _mappingPath.TextChanged += (_, _) => SaveSettings();
+        _targetCs.TextChanged += (_, _) => SaveSettings();
+        _topMostBox.CheckedChanged += (_, _) => { TopMost = _topMostBox.Checked; SaveSettings(); };
+        _run.Click += (_, _) => TraVaChay();
+        _cmdLabel.KeyDown += MappingKeyDown;
+        _cmdVar.KeyDown += MappingKeyDown;
+
         Load += (_, _) =>
         {
+            _loading = true;
+            var s = AppSettings.Load();
+            _mappingPath.Text = s.MappingPath ?? "";
+            _targetCs.Text = s.TargetCsPath ?? "";
+            _topMostBox.Checked = s.TopMost;
+            TopMost = s.TopMost;
+            _loading = false;
+
             VsAutomation.OleMessageFilter.Register();
             LoadInstances();
         };
     }
+
+    void MappingKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Control && e.KeyCode == Keys.Enter)
+        {
+            e.SuppressKeyPress = true;
+            TraVaChay();
+        }
+    }
+
+    void SaveSettings()
+    {
+        if (_loading) return;
+        new AppSettings
+        {
+            MappingPath = _mappingPath.Text,
+            TargetCsPath = _targetCs.Text,
+            TopMost = _topMostBox.Checked
+        }.Save();
+    }
+
+    void PickFile(TextBox target, string filter)
+    {
+        using var d = new OpenFileDialog { Filter = filter };
+        try
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(target.Text));
+            if (Directory.Exists(dir)) d.InitialDirectory = dir;
+        }
+        catch { /* path rỗng / không hợp lệ — bỏ qua */ }
+        if (d.ShowDialog(this) == DialogResult.OK) target.Text = d.FileName;
+    }
+
+    // Task 10 cài đặt thật.
+    void TraVaChay() => Log("Tra & Chạy: (được cài đặt ở Task 10)");
 
     void LoadInstances()
     {
@@ -97,7 +184,7 @@ public class MainForm : Form
             _instances.SelectedIndex = 0;
         }
 
-        _goto.Enabled = _bp.Enabled = _addWatch.Enabled = any;
+        _goto.Enabled = _bp.Enabled = _addWatch.Enabled = _run.Enabled = any;
         Log(any ? $"Tìm thấy {_instances.Items.Count} instance VS." : "Không tìm thấy VS nào đang chạy.");
     }
 
