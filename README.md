@@ -49,6 +49,16 @@ trong file `.cs` rồi mới ghi thêm 1 dòng vào `mapping.csv` và chạy ti�
 đang mở trong Excel thì không ghi được — đóng Excel rồi thử lại (tool vẫn chạy tiếp lần này).
 Checkbox **Luôn nổi trên cùng** giữ form không bị trình duyệt / Excel che.
 
+Tiện ích thêm:
+- **Kiểm tra mapping.csv** — soát toàn bộ dòng: cặp `cmdLabel+cmdVar` trùng, và `csharpLabel`
+  không tra được trong file `.cs` đích (thiếu / trùng / sau label không có lệnh). Kết quả in ở log.
+- **Chỉ tra (không cần VS)** — checkbox: Tra & Chạy chỉ điền `File`/`Line`/`Watch` + log vị trí,
+  không cần chọn instance VS, không goto/breakpoint. Dùng để soạn trước hoặc đối chiếu mapping.
+- **Xóa BP file này** — xóa mọi breakpoint trong file đang ở ô `File` (dọn giữa các test case;
+  `Tra & Chạy` chỉ thêm breakpoint, không tự xóa).
+- **Copy Watch** — copy biểu thức ở ô `Watch` vào clipboard để tự `Ctrl+V` vào cửa sổ Watch
+  (dùng khi `Add Watch` qua SendKeys bị chặn: VS chạy admin, mất foreground…).
+
 ## Kiểm thử thủ công
 
 | # | Thao tác | Kỳ vọng |

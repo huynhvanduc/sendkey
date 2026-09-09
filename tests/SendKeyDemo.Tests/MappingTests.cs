@@ -295,4 +295,46 @@ public class MappingTests
         Assert.Equal("if \"%RC%\" NEQ \"0\"", rows[0].CmdVar);
         Assert.Equal("rc != 0", rows[0].CsharpVar);
     }
+
+    [Fact]
+    public void Validate_clean_rows_no_problems()
+    {
+        var rows = new List<MapRow>
+        {
+            new("CHECK_INPUT", "%RC%", "CHECK_INPUT", "rc", 2),
+        };
+        var cs = new[] { "  CHECK_INPUT:", "  rc = 0;" };
+        Assert.Empty(Mapping.Validate(rows, cs));
+    }
+
+    [Fact]
+    public void Validate_flags_duplicate_pair_with_source_lines()
+    {
+        var rows = new List<MapRow>
+        {
+            new("L", "%X%", "L", "x",  2),
+            new("L", " %x% ", "L", "x2", 6),
+        };
+        var p = Mapping.Validate(rows, null);
+        Assert.Single(p);
+        Assert.Contains("2, 6", p[0]);
+    }
+
+    [Fact]
+    public void Validate_flags_label_missing_in_cs()
+    {
+        var rows = new List<MapRow> { new("L", "%X%", "NOSUCH", "x", 3) };
+        var cs = new[] { "  L:", "  rc = 0;" };
+        var p = Mapping.Validate(rows, cs);
+        Assert.Single(p);
+        Assert.Contains("dòng 3", p[0]);
+        Assert.Contains("NOSUCH", p[0]);
+    }
+
+    [Fact]
+    public void Validate_null_cslines_skips_label_checks()
+    {
+        var rows = new List<MapRow> { new("L", "%X%", "NOSUCH", "x", 3) };
+        Assert.Empty(Mapping.Validate(rows, null));
+    }
 }

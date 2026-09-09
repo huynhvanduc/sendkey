@@ -28,7 +28,11 @@ public class MainForm : Form
     readonly TextBox _cmdLabel = new() { Dock = DockStyle.Fill };
     readonly TextBox _cmdVar = new() { Dock = DockStyle.Fill };
     readonly Button _run = new() { Text = "Tra & Chạy", AutoSize = true };
+    readonly Button _checkMapping = new() { Text = "Kiểm tra mapping.csv", AutoSize = true };
+    readonly Button _clearBpFile = new() { Text = "Xóa BP file này", AutoSize = true };
+    readonly Button _copyWatch = new() { Text = "Copy Watch", AutoSize = true };
     readonly CheckBox _topMostBox = new() { Text = "Luôn nổi trên cùng", AutoSize = true, Checked = true };
+    readonly CheckBox _lookupOnlyBox = new() { Text = "Chỉ tra (không cần VS)", AutoSize = true };
     bool _loading;
     List<MapRow>? _mapRows;
     string _mapRowsPath = "";
@@ -61,7 +65,10 @@ public class MainForm : Form
         mapGrid.Controls.Add(_cmdLabel, 1, 2);
         mapGrid.Controls.Add(new Label { Text = "cmdVar", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
         mapGrid.Controls.Add(_cmdVar, 1, 3);
-        mapGrid.Controls.Add(_run, 1, 4);
+        var mapBtns = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
+        mapBtns.Controls.Add(_run);
+        mapBtns.Controls.Add(_checkMapping);
+        mapGrid.Controls.Add(mapBtns, 1, 4);
 
         var grid = new TableLayoutPanel
         {
@@ -81,10 +88,13 @@ public class MainForm : Form
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8, 0, 8, 8) };
         buttons.Controls.Add(_goto);
         buttons.Controls.Add(_bp);
+        buttons.Controls.Add(_clearBpFile);
         buttons.Controls.Add(_addWatch);
+        buttons.Controls.Add(_copyWatch);
 
         var bottomPanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(8, 0, 8, 4) };
         bottomPanel.Controls.Add(_topMostBox);
+        bottomPanel.Controls.Add(_lookupOnlyBox);
 
         var logHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8) };
         logHost.Controls.Add(_log);
@@ -104,7 +114,12 @@ public class MainForm : Form
         };
         _goto.Click += (_, _) => Run("Go To Line", dte => VsAutomation.GoToLine(dte, _file.Text, (int)_line.Value));
         _bp.Click += (_, _) => Run("Toggle Breakpoint", dte => VsAutomation.ToggleBreakpoint(dte, _file.Text, (int)_line.Value));
+        _clearBpFile.Click += (_, _) => Run("Xóa breakpoint", dte => VsAutomation.ClearBreakpointsInFile(dte, _file.Text));
         _addWatch.Click += (_, _) => Run("Add Watch", dte => VsAutomation.AddWatch(dte, _watch.Text));
+        _copyWatch.Click += (_, _) => CopyWatch();
+        _checkMapping.Click += (_, _) => KiemTraMapping();
+        _lookupOnlyBox.CheckedChanged += (_, _) =>
+            _run.Enabled = _lookupOnlyBox.Checked || _instances.SelectedItem is VsInstance;
 
         _mappingBrowse.Click += (_, _) => PickFile(_mappingPath, "CSV (*.csv)|*.csv|Tất cả (*.*)|*.*");
         _targetBrowse.Click += (_, _) => PickFile(_targetCs, "C# (*.cs)|*.cs|Tất cả (*.*)|*.*");
@@ -348,9 +363,10 @@ public class MainForm : Form
 
     void TraVaChay()
     {
-        if (_instances.SelectedItem is not VsInstance)
+        bool lookupOnly = _lookupOnlyBox.Checked;
+        if (!lookupOnly && _instances.SelectedItem is not VsInstance)
         {
-            Log("Tra & Chạy: chưa chọn instance VS.");
+            Log("Tra & Chạy: chưa chọn instance VS (hoặc bật \"Chỉ tra\").");
             return;
         }
 
@@ -437,12 +453,55 @@ public class MainForm : Form
         _line.Value = Math.Min(line, (int)_line.Maximum);
         if (!labelOnly) _watch.Text = row.CsharpVar;
 
+        if (lookupOnly)
+        {
+            Log($"Chỉ tra: {labelRaw} → {Path.GetFileName(csPath)}:{line}"
+                + (labelOnly ? "" : $", watch \"{row.CsharpVar}\"")
+                + " — đã điền File/Line/Watch (không thao tác VS).");
+            return;
+        }
+
         Run("Go To Line", dte => VsAutomation.GoToLine(dte, csPath, line));
         Run("Breakpoint", dte => VsAutomation.EnsureBreakpoint(dte, csPath, line));
 
         Log(labelOnly
             ? $"mapping: {labelRaw} → {Path.GetFileName(csPath)}:{line} — breakpoint sẵn sàng (F5 để dừng lại)."
             : $"mapping: {labelRaw}/{_cmdVar.Text} → {Path.GetFileName(csPath)}:{line}, watch \"{row.CsharpVar}\" — F5 dừng ở breakpoint rồi bấm Add Watch.");
+    }
+
+    void CopyWatch()
+    {
+        var t = _watch.Text.Trim();
+        if (t.Length == 0) { Log("Copy Watch: ô Watch đang trống."); return; }
+        try
+        {
+            Clipboard.SetText(t);
+            Log($"Copy Watch: đã copy \"{t}\" — dán (Ctrl+V) vào cửa sổ Watch của VS.");
+        }
+        catch (Exception ex)
+        {
+            Log("Copy Watch: lỗi clipboard — " + ex.Message);
+        }
+    }
+
+    void KiemTraMapping()
+    {
+        var rows = GetMapRows();
+        if (rows == null) return;
+
+        var csPath = _targetCs.Text.Trim();
+        IReadOnlyList<string>? csLines = File.Exists(csPath) ? File.ReadAllLines(csPath) : null;
+        if (csLines == null)
+            Log("Kiểm tra mapping.csv: chưa trỏ file .cs hợp lệ — chỉ kiểm trùng cặp cmdLabel+cmdVar.");
+
+        var problems = Mapping.Validate(rows, csLines);
+        if (problems.Count == 0)
+        {
+            Log($"Kiểm tra mapping.csv: OK — {rows.Count} dòng, không thấy vấn đề.");
+            return;
+        }
+        Log($"Kiểm tra mapping.csv: {problems.Count} vấn đề / {rows.Count} dòng:");
+        foreach (var p in problems) Log("  - " + p);
     }
 
     void LoadInstances()
@@ -467,7 +526,8 @@ public class MainForm : Form
             _instances.SelectedIndex = 0;
         }
 
-        _goto.Enabled = _bp.Enabled = _addWatch.Enabled = _run.Enabled = any;
+        _goto.Enabled = _bp.Enabled = _clearBpFile.Enabled = _addWatch.Enabled = any;
+        _run.Enabled = any || _lookupOnlyBox.Checked;
         Log(any ? $"Tìm thấy {_instances.Items.Count} instance VS." : "Không tìm thấy VS nào đang chạy.");
     }
 

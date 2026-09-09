@@ -92,6 +92,21 @@ public static class VsAutomation
         return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
     }
 
+    public static string ClearBreakpointsInFile(DTE dte, string file)
+    {
+        if (string.IsNullOrWhiteSpace(file)) return "chưa có file để xóa breakpoint";
+        var bps = dte.Debugger.Breakpoints;
+        int n = 0;
+        for (int i = bps.Count; i >= 1; i--)   // duyệt ngược vì Delete() đổi collection
+        {
+            Breakpoint bp = bps.Item(i);
+            if (string.Equals(bp.File, file, StringComparison.OrdinalIgnoreCase)) { bp.Delete(); n++; }
+        }
+        return n == 0
+            ? $"không có breakpoint nào ở {Path.GetFileName(file)}"
+            : $"đã xóa {n} breakpoint ở {Path.GetFileName(file)}";
+    }
+
     public static string EnsureBreakpoint(DTE dte, string file, int line)
     {
         if (!File.Exists(file)) return $"file không tồn tại: {file}";

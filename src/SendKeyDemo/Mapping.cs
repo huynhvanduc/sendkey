@@ -157,6 +157,39 @@ public static class Mapping
         return new LabelLineResult(LabelLineKind.NoExecutableLine);
     }
 
+    /// <summary>Soát toàn bộ mapping.csv: cặp trùng, và (nếu có csLines) label không tra được trong file .cs.</summary>
+    public static List<string> Validate(IReadOnlyList<MapRow> rows, IReadOnlyList<string>? csLines)
+    {
+        var problems = new List<string>();
+
+        var dups = rows
+            .GroupBy(r => (NormalizeLabel(r.CmdLabel), NormalizeVar(r.CmdVar)))
+            .Where(g => g.Count() > 1);
+        foreach (var g in dups)
+            problems.Add($"trùng cặp cmdLabel+cmdVar ở dòng {string.Join(", ", g.Select(r => r.SourceLine))}");
+
+        if (csLines != null)
+        {
+            foreach (var r in rows)
+            {
+                var ll = FindLabelLineInText(csLines, r.CsharpLabel);
+                switch (ll.Kind)
+                {
+                    case LabelLineKind.NotFound:
+                        problems.Add($"dòng {r.SourceLine}: không thấy \"{r.CsharpLabel}:\" trong file .cs");
+                        break;
+                    case LabelLineKind.Multiple:
+                        problems.Add($"dòng {r.SourceLine}: \"{r.CsharpLabel}:\" xuất hiện {ll.MatchLines!.Count} lần trong file .cs");
+                        break;
+                    case LabelLineKind.NoExecutableLine:
+                        problems.Add($"dòng {r.SourceLine}: sau \"{r.CsharpLabel}:\" không còn dòng thực thi");
+                        break;
+                }
+            }
+        }
+        return problems;
+    }
+
     public static LookupResult Resolve(IReadOnlyList<MapRow> rows, string cmdLabelRaw, string? cmdVarRaw)
     {
         var label = NormalizeLabel(cmdLabelRaw);
