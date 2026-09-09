@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -42,7 +43,14 @@ public sealed class AppSettings
 
     static string DefaultPath => Path.Combine(AppContext.BaseDirectory, "settings.json");
 
-    public static AppSettings Load() => Load(DefaultPath);
+    public static AppSettings Load()
+    {
+        bool firstRun = !File.Exists(DefaultPath);
+        var s = Load(DefaultPath);
+        // Lần đầu chạy: ghi ra file mặc định để người dùng có chỗ sửa hotkey / SaveFolder.
+        if (firstRun) s.Save();
+        return s;
+    }
 
     public static AppSettings Load(string path)
     {
@@ -59,11 +67,18 @@ public sealed class AppSettings
 
     public void Save() => Save(DefaultPath);
 
+    // File này người dùng sửa tay (hotkey, SaveFolder) nên không escape "+" thành +.
+    static readonly JsonSerializerOptions _json = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
     public void Save(string path)
     {
         try
         {
-            File.WriteAllText(path, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(path, JsonSerializer.Serialize(this, _json));
         }
         catch
         {
