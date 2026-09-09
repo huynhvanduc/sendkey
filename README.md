@@ -30,9 +30,12 @@ Yêu cầu: Windows, .NET 8 SDK, có Visual Studio 2022/2026 đang mở sẵn m�
 
 Dùng khi chụp Unit Test cho code batch đã migrate sang C# (giữ `nhãn:` + `goto`).
 
-1. **mapping.csv** — 4 cột, 1 dòng header: `cmdLabel,cmdVar,csharpLabel,csharpVar`.
+1. **mapping.csv** — 4 hoặc 5 cột, 1 dòng header: `cmdLabel,cmdVar,csharpLabel,csharpVar[,csharpFile]`.
    - `cmdVar`: token biến batch (`%RC%`) hoặc nguyên mệnh đề `if`.
    - `csharpVar`: định danh C# hoặc biểu thức C# đã dịch sẵn (cho mệnh đề `if`).
+   - `csharpFile` (tùy chọn): đường dẫn file `.cs` cho riêng dòng đó — tuyệt đối, hoặc
+     tương đối theo thư mục chứa `mapping.csv`. Trống = dùng ô **target .cs**. Dùng khi
+     code migrate nằm rải nhiều file. Trộn dòng 4 cột và 5 cột trong cùng file được.
    - Field chứa `,` hoặc `"` phải bọc `"…"`, dấu `"` bên trong viết `""` (RFC 4180).
    - Đặt nhãn C# trên **dòng riêng**; breakpoint sẽ nằm ở dòng thực thi kế tiếp.
 2. Trỏ ô **mapping.csv** và **target .cs** (nút Browse). App nhớ 2 đường dẫn cho lần sau.
@@ -58,6 +61,11 @@ Tiện ích thêm:
   `Tra & Chạy` chỉ thêm breakpoint, không tự xóa).
 - **Copy Watch** — copy biểu thức ở ô `Watch` vào clipboard để tự `Ctrl+V` vào cửa sổ Watch
   (dùng khi `Add Watch` qua SendKeys bị chặn: VS chạy admin, mất foreground…).
+- **Batch…** — mở form dán nhiều dòng, mỗi dòng `cmdLabel <Tab> cmdVar` (hoặc ≥2 dấu cách;
+  trống `cmdVar` = chỉ đặt breakpoint ở label). Bấm **Chạy** → tra từng dòng, đặt breakpoint
+  cho mọi dòng hợp lệ (goto dòng đầu tiên), in bảng `[OK]/[LỖI]` + tổng kết. Tôn trọng
+  checkbox **Chỉ tra** (khi bật: chỉ liệt kê vị trí, không đụng VS). Không popup chọn biến /
+  thêm mapping giữa chừng — dòng nào hỏng thì báo lỗi và bỏ qua.
 
 ## Kiểm thử thủ công
 
@@ -78,6 +86,8 @@ Tiện ích thêm:
 | 13 | cmdLabel = `KHONGCO`, cmdVar = `%RC%`, **Tra & Chạy** → ở form "Thêm mapping mới" gõ `csharpLabel = NOSUCH`, `csharpVar = rc` → OK | Form báo đỏ `không thấy "NOSUCH:"`; `mapping.csv` không đổi |
 | 14 | Sửa `csharpLabel = END_PROC` (giữ `csharpVar = rc`) → OK | `mapping.csv` có thêm dòng `KHONGCO,%RC%,END_PROC,rc`; log `ĐÃ THÊM mapping…`; VS goto + breakpoint ở `END_PROC`; `Watch = rc` |
 | 15 | Sau bước 10: **F5** debug `SampleTarget`, đợi dừng ở breakpoint, bấm **Add Watch** | Dòng `rc` xuất hiện trong cửa sổ Watch kèm giá trị `0` |
+| 16 | Bấm **Batch…**, dán 3 dòng: `CHECK_INPUT<Tab>%RC%` / `VALIDATE_DATE` / `KHONGCO<Tab>%RC%`, bấm **Chạy** | Bảng: 2 `[OK]` (Program.cs:19, :24) + 1 `[LỖI] … không thấy label`; 2 chấm đỏ trong VS; tổng kết `2 OK, 1 lỗi / 3 dòng` |
+| 17 | Bật **Chỉ tra**, lặp lại bước 16 | Cùng bảng nhưng không đặt breakpoint; tổng kết có `(Chỉ tra …)` |
 
 ## Ghi chú
 

@@ -304,7 +304,7 @@ public class MappingTests
             new("CHECK_INPUT", "%RC%", "CHECK_INPUT", "rc", 2),
         };
         var cs = new[] { "  CHECK_INPUT:", "  rc = 0;" };
-        Assert.Empty(Mapping.Validate(rows, cs));
+        Assert.Empty(Mapping.Validate(rows, _ => cs));
     }
 
     [Fact]
@@ -315,7 +315,7 @@ public class MappingTests
             new("L", "%X%", "L", "x",  2),
             new("L", " %x% ", "L", "x2", 6),
         };
-        var p = Mapping.Validate(rows, null);
+        var p = Mapping.Validate(rows, _ => null);
         Assert.Single(p);
         Assert.Contains("2, 6", p[0]);
     }
@@ -325,16 +325,70 @@ public class MappingTests
     {
         var rows = new List<MapRow> { new("L", "%X%", "NOSUCH", "x", 3) };
         var cs = new[] { "  L:", "  rc = 0;" };
-        var p = Mapping.Validate(rows, cs);
+        var p = Mapping.Validate(rows, _ => cs);
         Assert.Single(p);
         Assert.Contains("dòng 3", p[0]);
         Assert.Contains("NOSUCH", p[0]);
     }
 
     [Fact]
-    public void Validate_null_cslines_skips_label_checks()
+    public void Validate_null_lines_skips_label_checks()
     {
         var rows = new List<MapRow> { new("L", "%X%", "NOSUCH", "x", 3) };
-        Assert.Empty(Mapping.Validate(rows, null));
+        Assert.Empty(Mapping.Validate(rows, _ => null));
+    }
+
+    [Fact]
+    public void Load_accepts_optional_fifth_csharpFile_column()
+    {
+        var p = Path.GetTempFileName();
+        File.WriteAllText(p,
+            "cmdLabel,cmdVar,csharpLabel,csharpVar,csharpFile\n" +
+            "A,%X%,A,x,sub/Foo.cs\n" +
+            "B,%Y%,B,y\n");                              // dòng 4 cột vẫn hợp lệ
+        var rows = Mapping.Load(p);
+        File.Delete(p);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("sub/Foo.cs", rows[0].CsharpFile);
+        Assert.Equal("", rows[1].CsharpFile);
+    }
+
+    [Fact]
+    public void Load_throws_on_six_columns()
+    {
+        var p = Path.GetTempFileName();
+        File.WriteAllText(p,
+            "cmdLabel,cmdVar,csharpLabel,csharpVar,csharpFile\n" +
+            "A,%X%,A,x,f.cs,extra\n");
+        var ex = Assert.Throws<MappingFormatException>(() => Mapping.Load(p));
+        File.Delete(p);
+        Assert.Equal(2, ex.LineNumber);
+    }
+
+    [Fact]
+    public void AppendRow_writes_five_columns_when_csharpFile_set()
+    {
+        var p = Path.GetTempFileName();
+        File.WriteAllText(p, "cmdLabel,cmdVar,csharpLabel,csharpVar,csharpFile\n");
+        Mapping.AppendRow(p, new MapRow("A", "%X%", "A", "x", 0, "sub/Foo.cs"));
+        var rows = Mapping.Load(p);
+        File.Delete(p);
+
+        Assert.Single(rows);
+        Assert.Equal("sub/Foo.cs", rows[0].CsharpFile);
+        Assert.Equal("x", rows[0].CsharpVar);
+    }
+
+    [Theory]
+    [InlineData("CHECK_INPUT\t%RC%", "CHECK_INPUT", "%RC%")]
+    [InlineData("CHECK_INPUT   %RC%", "CHECK_INPUT", "%RC%")]
+    [InlineData("  VALIDATE_DATE  ", "VALIDATE_DATE", "")]
+    [InlineData("L\tif \"%RC%\" NEQ \"0\"", "L", "if \"%RC%\" NEQ \"0\"")]
+    public void SplitBatchLine_cases(string raw, string label, string var)
+    {
+        var (l, v) = Mapping.SplitBatchLine(raw);
+        Assert.Equal(label, l);
+        Assert.Equal(var, v);
     }
 }

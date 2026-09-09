@@ -4,7 +4,8 @@ using System.Text.RegularExpressions;
 
 namespace SendKeyDemo;
 
-public record MapRow(string CmdLabel, string CmdVar, string CsharpLabel, string CsharpVar, int SourceLine);
+public record MapRow(string CmdLabel, string CmdVar, string CsharpLabel, string CsharpVar, int SourceLine,
+    string CsharpFile = "");
 
 public enum LookupKind { NotFoundLabel, NeedPickVar, Duplicate, Ok }
 
@@ -97,9 +98,10 @@ public static class Mapping
             if (i == 0) continue;                     // bỏ header
             var f = raw[i];
             if (f.Length == 1 && f[0].Trim().Length == 0) continue;   // dòng trống
-            if (f.Length != 4)
-                throw new MappingFormatException(lineNo, $"cần 4 cột, thấy {f.Length}");
-            result.Add(new MapRow(f[0].Trim(), f[1].Trim(), f[2].Trim(), f[3].Trim(), lineNo));
+            if (f.Length is not (4 or 5))
+                throw new MappingFormatException(lineNo, $"cần 4 hoặc 5 cột, thấy {f.Length}");
+            result.Add(new MapRow(f[0].Trim(), f[1].Trim(), f[2].Trim(), f[3].Trim(), lineNo,
+                f.Length == 5 ? f[4].Trim() : ""));
         }
         return result;
     }
@@ -114,11 +116,10 @@ public static class Mapping
     {
         var existing = File.ReadAllText(csvPath);
         var prefix = existing.Length > 0 && !existing.EndsWith("\n") ? "\n" : "";
-        var line = string.Join(",", new[]
-        {
-            ToCsvField(row.CmdLabel), ToCsvField(row.CmdVar),
-            ToCsvField(row.CsharpLabel), ToCsvField(row.CsharpVar),
-        });
+        var fields = row.CsharpFile.Length > 0
+            ? new[] { row.CmdLabel, row.CmdVar, row.CsharpLabel, row.CsharpVar, row.CsharpFile }
+            : new[] { row.CmdLabel, row.CmdVar, row.CsharpLabel, row.CsharpVar };
+        var line = string.Join(",", fields.Select(ToCsvField));
         File.AppendAllText(csvPath, prefix + line + "\n", new UTF8Encoding(false));
     }
 
@@ -157,8 +158,8 @@ public static class Mapping
         return new LabelLineResult(LabelLineKind.NoExecutableLine);
     }
 
-    /// <summary>Soát toàn bộ mapping.csv: cặp trùng, và (nếu có csLines) label không tra được trong file .cs.</summary>
-    public static List<string> Validate(IReadOnlyList<MapRow> rows, IReadOnlyList<string>? csLines)
+    /// <summary>Soát mapping.csv: cặp trùng, và label không tra được trong file .cs (linesFor trả null = bỏ qua dòng đó).</summary>
+    public static List<string> Validate(IReadOnlyList<MapRow> rows, Func<MapRow, IReadOnlyList<string>?> linesFor)
     {
         var problems = new List<string>();
 
@@ -168,26 +169,43 @@ public static class Mapping
         foreach (var g in dups)
             problems.Add($"trùng cặp cmdLabel+cmdVar ở dòng {string.Join(", ", g.Select(r => r.SourceLine))}");
 
-        if (csLines != null)
+        foreach (var r in rows)
         {
-            foreach (var r in rows)
+            var lines = linesFor(r);
+            if (lines == null) continue;
+            var ll = FindLabelLineInText(lines, r.CsharpLabel);
+            switch (ll.Kind)
             {
-                var ll = FindLabelLineInText(csLines, r.CsharpLabel);
-                switch (ll.Kind)
-                {
-                    case LabelLineKind.NotFound:
-                        problems.Add($"dòng {r.SourceLine}: không thấy \"{r.CsharpLabel}:\" trong file .cs");
-                        break;
-                    case LabelLineKind.Multiple:
-                        problems.Add($"dòng {r.SourceLine}: \"{r.CsharpLabel}:\" xuất hiện {ll.MatchLines!.Count} lần trong file .cs");
-                        break;
-                    case LabelLineKind.NoExecutableLine:
-                        problems.Add($"dòng {r.SourceLine}: sau \"{r.CsharpLabel}:\" không còn dòng thực thi");
-                        break;
-                }
+                case LabelLineKind.NotFound:
+                    problems.Add($"dòng {r.SourceLine}: không thấy \"{r.CsharpLabel}:\" trong file .cs");
+                    break;
+                case LabelLineKind.Multiple:
+                    problems.Add($"dòng {r.SourceLine}: \"{r.CsharpLabel}:\" xuất hiện {ll.MatchLines!.Count} lần trong file .cs");
+                    break;
+                case LabelLineKind.NoExecutableLine:
+                    problems.Add($"dòng {r.SourceLine}: sau \"{r.CsharpLabel}:\" không còn dòng thực thi");
+                    break;
             }
         }
         return problems;
+    }
+
+    /// <summary>Tách 1 dòng batch thành (cmdLabel, cmdVar): ngăn bằng Tab hoặc ≥2 dấu cách; không có = cả dòng là label.</summary>
+    public static (string Label, string Var) SplitBatchLine(string raw)
+    {
+        var s = (raw ?? "").Trim();
+        int tab = s.IndexOf('\t');
+        if (tab >= 0) return (s[..tab].Trim(), s[(tab + 1)..].Trim());
+        for (int i = 0; i + 1 < s.Length; i++)
+        {
+            if (s[i] == ' ' && s[i + 1] == ' ')
+            {
+                int j = i;
+                while (j < s.Length && s[j] == ' ') j++;
+                return (s[..i].Trim(), s[j..].Trim());
+            }
+        }
+        return (s, "");
     }
 
     public static LookupResult Resolve(IReadOnlyList<MapRow> rows, string cmdLabelRaw, string? cmdVarRaw)
