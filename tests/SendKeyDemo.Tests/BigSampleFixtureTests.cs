@@ -47,37 +47,26 @@ public class BigSampleFixtureTests
         Assert.Empty(problems);
     }
 
-    // Mô phỏng đúng vòng lặp của BatchDialog (SplitBatchLine → Resolve → FindLabelLine),
-    // in ra bảng [OK]/[LỖI] mà form sẽ hiện. Bỏ phần EnsureBreakpoint/GoToLine (cần DTE).
+    // Chạy đúng vòng lặp của BatchDialog (lọc #/blank → SplitBatchLine → Resolve → FindLabelLine)
+    // trên CHÍNH file samples/BigSample/cmd-input.txt, in ra bảng [OK]/[LỖI] mà form sẽ hiện.
+    // Bỏ phần EnsureBreakpoint/GoToLine (cần DTE sống).
     [Fact]
-    public void Batch_mode_over_BigSample_paste()
+    public void Batch_mode_over_cmd_input_txt()
     {
         var rows = Mapping.Load(Path.Combine(Dir, "mapping.csv"));
-
-        var paste = new[]
-        {
-            "# khối test — dòng này bị bỏ qua",  // comment -> bỏ qua
-            "",                                   // dòng trống -> bỏ qua
-            "CHECK_INPUT\t%RC%",
-            "VALIDATE_DETAIL\t%LINE_CNT%",
-            "CALC_TOTAL   %TOTAL%",              // ngăn bằng ≥2 dấu cách
-            "APPLY_DISCOUNT",                    // label-only
-            "RECALC\t%AMT%",                     // sang Steps.cs qua csharpFile
-            "AUDIT_LOG\t%MSG%",                  // sang Steps.cs
-            "CHECK_INPUT\tif \"%RC%\" NEQ \"0\"",// mệnh đề if -> anchor tới dòng "if (rc != 0)"
-            "NOPE\t%RC%",                        // label không có -> LỖI
-            "CHECK_INPUT\t%WRONGVAR%",           // var không khớp -> LỖI
-        };
+        var raw = File.ReadAllLines(Path.Combine(Dir, "cmd-input.txt"))
+            .Where(l => l.Trim().Length > 0 && !l.TrimStart().StartsWith("#"))
+            .ToArray();
 
         int ok = 0, fail = 0;
-        foreach (var raw in paste)
+        string? ifClauseLine = null;
+        foreach (var line in raw)
         {
-            if (raw.Trim().Length == 0 || raw.TrimStart().StartsWith("#")) continue;
-            var (lbl, v) = Mapping.SplitBatchLine(raw);
+            var (lbl, v) = Mapping.SplitBatchLine(line);
             var res = Mapping.Resolve(rows, lbl, v.Length == 0 ? null : v);
             if (res.Kind != LookupKind.Ok)
             {
-                _out.WriteLine($"[LỖI] {raw,-28} — {res.Kind}");
+                _out.WriteLine($"[LỖI] {line,-34} — {res.Kind}");
                 fail++;
                 continue;
             }
@@ -86,16 +75,18 @@ public class BigSampleFixtureTests
             var ll = Mapping.FindLabelLine(Path.Combine(Dir, csFile), row.CsharpLabel, row.CsharpVar);
             if (ll.Kind != LabelLineKind.Ok)
             {
-                _out.WriteLine($"[LỖI] {raw,-34} — {ll.Kind} @ {csFile}");
+                _out.WriteLine($"[LỖI] {line,-34} — {ll.Kind} @ {csFile}");
                 fail++;
                 continue;
             }
-            _out.WriteLine($"[OK]  {raw,-34} → {csFile}:{ll.Line}  (watch: {row.CsharpVar})");
+            _out.WriteLine($"[OK]  {line,-34} → {csFile}:{ll.Line}  (watch: {row.CsharpVar})");
+            if (v.Contains("NEQ")) ifClauseLine = $"{csFile}:{ll.Line}";
             ok++;
         }
-        _out.WriteLine($"\nTổng: {ok} OK, {fail} lỗi / {paste.Length} dòng.");
+        _out.WriteLine($"\nTổng: {ok} OK, {fail} lỗi / {raw.Length} dòng dữ liệu.");
 
-        Assert.Equal(7, ok);
+        Assert.Equal(18, ok);
         Assert.Equal(2, fail);
+        Assert.Equal("Program.cs:39", ifClauseLine);   // mệnh đề if -> anchor tới "if (rc != 0) …"
     }
 }
