@@ -33,6 +33,10 @@ public static class Mapping
     public static string NormalizeLabel(string raw)
         => _ws.Replace((raw ?? "").Trim(), " ").TrimStart(':').Trim().ToLowerInvariant();
 
+    /// <summary>Dọn label để GHI vào file — như NormalizeLabel nhưng GIỮ NGUYÊN hoa/thường.</summary>
+    public static string CleanLabel(string raw)
+        => _ws.Replace((raw ?? "").Trim(), " ").Trim(':').Trim();
+
     public static string NormalizeVar(string raw)
     {
         var s = _ws.Replace((raw ?? "").Trim(), " ");
@@ -98,6 +102,24 @@ public static class Mapping
             result.Add(new MapRow(f[0].Trim(), f[1].Trim(), f[2].Trim(), f[3].Trim(), lineNo));
         }
         return result;
+    }
+
+    static string ToCsvField(string s)
+        => s.IndexOfAny(new[] { ',', '"', '\r', '\n' }) >= 0
+            ? "\"" + s.Replace("\"", "\"\"") + "\""
+            : s;
+
+    /// <summary>Ghi thêm 1 dòng vào cuối mapping.csv (RFC 4180). Ném IOException nếu file đang bị khoá.</summary>
+    public static void AppendRow(string csvPath, MapRow row)
+    {
+        var existing = File.ReadAllText(csvPath);
+        var prefix = existing.Length > 0 && !existing.EndsWith("\n") ? "\n" : "";
+        var line = string.Join(",", new[]
+        {
+            ToCsvField(row.CmdLabel), ToCsvField(row.CmdVar),
+            ToCsvField(row.CsharpLabel), ToCsvField(row.CsharpVar),
+        });
+        File.AppendAllText(csvPath, prefix + line + "\n", new UTF8Encoding(false));
     }
 
     public static LabelLineResult FindLabelLine(string csPath, string csharpLabel)

@@ -193,11 +193,12 @@ public class MainForm : Form
         }
     }
 
-    static string? PickFromList(string title, IReadOnlyList<string> items)
+    static string? PickFromList(string title, IReadOnlyList<string> items, out bool addNew)
     {
+        bool wantAdd = false;
         using var dlg = new Form
         {
-            Text = title, Width = 440, Height = 320,
+            Text = title, Width = 440, Height = 340,
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MinimizeBox = false, MaximizeBox = false, TopMost = true
@@ -206,11 +207,143 @@ public class MainForm : Form
         foreach (var it in items) list.Items.Add(it);
         if (list.Items.Count > 0) list.SelectedIndex = 0;
         var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Dock = DockStyle.Bottom, Height = 32 };
+        var add = new Button { Text = "+ Thêm biến mới…", Dock = DockStyle.Bottom, Height = 32 };
+        add.Click += (_, _) => { wantAdd = true; dlg.Close(); };
         list.DoubleClick += (_, _) => { if (list.SelectedItem != null) ok.PerformClick(); };
         dlg.Controls.Add(list);
+        dlg.Controls.Add(add);
         dlg.Controls.Add(ok);
         dlg.AcceptButton = ok;
-        return dlg.ShowDialog() == DialogResult.OK ? list.SelectedItem as string : null;
+        var picked = dlg.ShowDialog() == DialogResult.OK ? list.SelectedItem as string : null;
+        addNew = wantAdd;
+        return wantAdd ? null : picked;
+    }
+
+    /// <summary>Form nhập 1 dòng mapping mới; validate csharpLabel với file .cs đích trước khi trả về.</summary>
+    static MapRow? AddMappingDialog(string csPath, string cmdLabelPrefill, string cmdVarPrefill,
+        IReadOnlyList<MapRow> rows)
+    {
+        var tbCmdLabel = new TextBox { Text = cmdLabelPrefill, Dock = DockStyle.Fill };
+        var tbCmdVar = new TextBox { Text = cmdVarPrefill, Dock = DockStyle.Fill };
+        var tbCsLabel = new TextBox { Dock = DockStyle.Fill };
+        var tbCsVar = new TextBox { Dock = DockStyle.Fill };
+        var err = new Label
+        {
+            ForeColor = Color.Firebrick, Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true
+        };
+
+        var grid = new TableLayoutPanel { ColumnCount = 2, RowCount = 5, Dock = DockStyle.Fill, Padding = new Padding(8) };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        for (int i = 0; i < 4; i++) grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        void AddRow(int r, string cap, Control c)
+        {
+            grid.Controls.Add(new Label { Text = cap, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 3, 3) }, 0, r);
+            grid.Controls.Add(c, 1, r);
+        }
+        AddRow(0, "cmdLabel", tbCmdLabel);
+        AddRow(1, "cmdVar", tbCmdVar);
+        AddRow(2, "csharpLabel", tbCsLabel);
+        AddRow(3, "csharpVar", tbCsVar);
+        grid.Controls.Add(err, 1, 4);
+
+        var ok = new Button { Text = "OK", AutoSize = true, MinimumSize = new Size(84, 28), Margin = new Padding(6, 0, 0, 0), Enabled = false };
+        var cancel = new Button { Text = "Hủy", AutoSize = true, MinimumSize = new Size(84, 28), DialogResult = DialogResult.Cancel };
+        var btnRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft,
+            AutoSize = true, Padding = new Padding(8)
+        };
+        btnRow.Controls.Add(ok);       // phải nhất
+        btnRow.Controls.Add(cancel);   // bên trái OK
+
+        using var dlg = new Form
+        {
+            Text = "Thêm mapping mới", Width = 470, Height = 280,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, TopMost = true
+        };
+        MapRow? result = null;
+
+        void Revalidate(object? s, EventArgs e)
+        {
+            err.Text = "";
+            ok.Enabled = tbCsLabel.Text.Trim().Length > 0 && tbCsVar.Text.Trim().Length > 0;
+        }
+        tbCmdLabel.TextChanged += Revalidate;
+        tbCmdVar.TextChanged += Revalidate;
+        tbCsLabel.TextChanged += Revalidate;
+        tbCsVar.TextChanged += Revalidate;
+
+        ok.Click += (_, _) =>
+        {
+            var cmdL = Mapping.CleanLabel(tbCmdLabel.Text);
+            var cmdV = tbCmdVar.Text.Trim();
+            var csL = Mapping.CleanLabel(tbCsLabel.Text);
+            var csV = tbCsVar.Text.Trim();
+            tbCmdLabel.Text = cmdL;
+            tbCsLabel.Text = csL;
+
+            if (cmdL.Length == 0) { err.Text = "cmdLabel: không được để trống."; tbCmdLabel.Focus(); return; }
+
+            var chk = Mapping.Resolve(rows, cmdL, cmdV.Length == 0 ? null : cmdV);
+            if (chk.Kind is LookupKind.Ok or LookupKind.Duplicate)
+            {
+                err.Text = "Cặp cmdLabel + cmdVar này đã có trong mapping.csv.";
+                tbCmdVar.Focus();
+                return;
+            }
+
+            var ll = Mapping.FindLabelLine(csPath, csL);
+            switch (ll.Kind)
+            {
+                case LabelLineKind.NotFound:
+                    err.Text = $"csharpLabel: không thấy \"{csL}:\" trong {Path.GetFileName(csPath)}.";
+                    tbCsLabel.Focus(); return;
+                case LabelLineKind.Multiple:
+                    err.Text = $"csharpLabel: \"{csL}:\" xuất hiện ở dòng {string.Join(", ", ll.MatchLines!)}.";
+                    tbCsLabel.Focus(); return;
+                case LabelLineKind.NoExecutableLine:
+                    err.Text = $"csharpLabel: sau \"{csL}:\" không còn dòng thực thi.";
+                    tbCsLabel.Focus(); return;
+            }
+
+            result = new MapRow(cmdL, cmdV, csL, csV, 0);
+            dlg.DialogResult = DialogResult.OK;
+            dlg.Close();
+        };
+
+        dlg.Controls.Add(grid);
+        dlg.Controls.Add(btnRow);
+        dlg.AcceptButton = ok;
+        dlg.CancelButton = cancel;
+        dlg.Shown += (_, _) => tbCsLabel.Focus();
+
+        return dlg.ShowDialog() == DialogResult.OK ? result : null;
+    }
+
+    MapRow SaveAddedRow(MapRow r)
+    {
+        _cmdLabel.Text = r.CmdLabel;
+        _cmdVar.Text = r.CmdVar;
+        try
+        {
+            Mapping.AppendRow(_mappingPath.Text.Trim(), r);
+            _mapRows = null;   // buộc GetMapRows nạp lại
+            Log($"ĐÃ THÊM mapping: {r.CmdLabel} / {r.CmdVar} → {r.CsharpLabel} / {r.CsharpVar} — kiểm tra lại bản dịch csharpVar.");
+        }
+        catch (IOException)
+        {
+            Log("Tra & Chạy: KHÔNG ghi được mapping.csv (đang mở trong Excel?). Vẫn chạy tiếp với dòng vừa nhập.");
+        }
+        catch (Exception ex)
+        {
+            Log("Tra & Chạy: lỗi ghi mapping.csv — " + ex.Message + ". Vẫn chạy tiếp.");
+        }
+        return r;
     }
 
     void TraVaChay()
@@ -242,36 +375,44 @@ public class MainForm : Form
 
         var res = Mapping.Resolve(rows, labelRaw, labelOnly ? null : varRaw);
 
-        if (res.Kind == LookupKind.NotFoundLabel)
-        {
-            Log($"Tra & Chạy: không thấy label \"{labelRaw}\" trong mapping.csv.");
-            return;
-        }
         if (res.Kind == LookupKind.Duplicate)
         {
             Log($"Tra & Chạy: mapping trùng dòng {string.Join(", ", res.DuplicateLines!)}.");
             return;
         }
-        if (res.Kind == LookupKind.NeedPickVar)
+
+        MapRow row;
+        if (res.Kind == LookupKind.NotFoundLabel)
         {
-            var pick = PickFromList($"Chọn biến của label {labelRaw}", res.VarChoices!);
-            if (pick == null)
-            {
-                Log("Tra & Chạy: đã hủy chọn biến.");
-                return;
-            }
-            _cmdVar.Text = pick;
-            varRaw = pick;
+            var added = AddMappingDialog(csPath, labelRaw, labelOnly ? "" : varRaw, rows);
+            if (added == null) { Log("Tra & Chạy: đã hủy thêm mapping."); return; }
+            row = SaveAddedRow(added);
             labelOnly = false;
-            res = Mapping.Resolve(rows, labelRaw, pick);
-            if (res.Kind != LookupKind.Ok)
+        }
+        else if (res.Kind == LookupKind.NeedPickVar)
+        {
+            var pick = PickFromList($"Chọn biến của label {labelRaw}", res.VarChoices!, out var addNew);
+            if (addNew)
             {
-                Log("Tra & Chạy: vẫn không khớp sau khi chọn biến.");
-                return;
+                var added = AddMappingDialog(csPath, labelRaw, varRaw, rows);
+                if (added == null) { Log("Tra & Chạy: đã hủy thêm mapping."); return; }
+                row = SaveAddedRow(added);
             }
+            else
+            {
+                if (pick == null) { Log("Tra & Chạy: đã hủy chọn biến."); return; }
+                _cmdVar.Text = pick;
+                var re = Mapping.Resolve(rows, labelRaw, pick);
+                if (re.Kind != LookupKind.Ok) { Log("Tra & Chạy: vẫn không khớp sau khi chọn biến."); return; }
+                row = re.Row!;
+            }
+            labelOnly = false;
+        }
+        else
+        {
+            row = res.Row!;
         }
 
-        var row = res.Row!;
         if (res.Warning != null) Log("Tra & Chạy: " + res.Warning);
 
         var lineRes = Mapping.FindLabelLine(csPath, row.CsharpLabel);

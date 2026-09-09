@@ -240,4 +240,59 @@ public class MappingTests
         Assert.Equal(LabelLineKind.Ok, r.Kind);
         Assert.Equal(4, r.Line);
     }
+
+    [Theory]
+    [InlineData(" :Check Input : ", "Check Input")]
+    [InlineData("CHECK_INPUT", "CHECK_INPUT")]
+    [InlineData("  END_PROC  ", "END_PROC")]
+    [InlineData("A\t B", "A B")]
+    public void CleanLabel_trims_strips_colons_keeps_case(string raw, string expected)
+        => Assert.Equal(expected, Mapping.CleanLabel(raw));
+
+    [Fact]
+    public void AppendRow_keeps_existing_rows_and_adds_one()
+    {
+        var p = Path.GetTempFileName();
+        File.WriteAllText(p,
+            "cmdLabel,cmdVar,csharpLabel,csharpVar\n" +
+            "CHECK_INPUT,%RC%,CHECK_INPUT,rc\n");
+        Mapping.AppendRow(p, new MapRow("NEW_LABEL", "%X%", "NEW_LABEL", "x", 0));
+        var rows = Mapping.Load(p);
+        File.Delete(p);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("CHECK_INPUT", rows[0].CmdLabel);
+        Assert.Equal("NEW_LABEL", rows[1].CmdLabel);
+        Assert.Equal("x", rows[1].CsharpVar);
+    }
+
+    [Fact]
+    public void AppendRow_adds_newline_when_file_has_none()
+    {
+        var p = Path.GetTempFileName();
+        File.WriteAllText(p,
+            "cmdLabel,cmdVar,csharpLabel,csharpVar\n" +
+            "CHECK_INPUT,%RC%,CHECK_INPUT,rc");          // không có newline cuối
+        Mapping.AppendRow(p, new MapRow("L2", "%Y%", "L2", "y", 0));
+        var rows = Mapping.Load(p);
+        File.Delete(p);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("rc", rows[0].CsharpVar);           // dòng cũ không bị dính
+        Assert.Equal("L2", rows[1].CmdLabel);
+    }
+
+    [Fact]
+    public void AppendRow_quotes_fields_with_comma_or_quote_roundtrip()
+    {
+        var p = Path.GetTempFileName();
+        File.WriteAllText(p, "cmdLabel,cmdVar,csharpLabel,csharpVar\n");
+        Mapping.AppendRow(p, new MapRow("CHECK", "if \"%RC%\" NEQ \"0\"", "CHECK", "rc != 0", 0));
+        var rows = Mapping.Load(p);
+        File.Delete(p);
+
+        Assert.Single(rows);
+        Assert.Equal("if \"%RC%\" NEQ \"0\"", rows[0].CmdVar);
+        Assert.Equal("rc != 0", rows[0].CsharpVar);
+    }
 }

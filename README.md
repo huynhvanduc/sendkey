@@ -42,7 +42,11 @@ Dùng khi chụp Unit Test cho code batch đã migrate sang C# (giữ `nhãn:` +
    nhảy tới label trong `.cs`, đặt breakpoint, và điền sẵn **Line** + **Watch**.
 5. **F5** trong VS, để chương trình **dừng ở breakpoint**, rồi bấm **Add Watch**.
 
-Không khớp `cmdVar` → tool hiện danh sách biến của label đó để chọn (không tự đoán).
+Không khớp `cmdVar` → tool hiện danh sách biến của label đó để chọn (không tự đoán),
+kèm nút **+ Thêm biến mới…**. Không thấy `cmdLabel` → tool mở form nhập dòng mapping
+mới (2 ô `cmd` điền sẵn, gõ `csharpLabel` + `csharpVar`). Tool kiểm `csharpLabel:` có
+trong file `.cs` rồi mới ghi thêm 1 dòng vào `mapping.csv` và chạy tiếp. Nếu `mapping.csv`
+đang mở trong Excel thì không ghi được — đóng Excel rồi thử lại (tool vẫn chạy tiếp lần này).
 Checkbox **Luôn nổi trên cùng** giữ form không bị trình duyệt / Excel che.
 
 ## Kiểm thử thủ công
@@ -61,8 +65,9 @@ Checkbox **Luôn nổi trên cùng** giữ form không bị trình duyệt / Exc
 | 10 | Paste `CHECK_INPUT` + `%RC%`, bấm **Tra & Chạy** (hoặc Ctrl+Enter) | `File`/`Line`/`Watch` tự điền (`Watch=rc`); VS nhảy tới dòng `rc = inputExists ? 0 : 1;`; chấm đỏ hiện; log `mapping: CHECK_INPUT/%RC% → Program.cs:<n>, watch "rc" …` |
 | 11 | Để trống `cmdVar`, cmdLabel = `VALIDATE_DATE`, **Tra & Chạy** | goto + breakpoint ở dòng `inDate = "2026-09-08";`; `Watch` không đổi; log `… breakpoint sẵn sàng` |
 | 12 | cmdLabel = `CHECK_INPUT`, cmdVar = `%SAI%`, **Tra & Chạy** | Hiện danh sách `%INPUT_FILE%`, `%RC%`, `if "%RC%" NEQ "0"` để chọn |
-| 13 | cmdLabel = `KHONGCO`, **Tra & Chạy** | log `không thấy label "KHONGCO" trong mapping.csv`; không thao tác VS |
-| 14 | Sau bước 10: **F5** debug `SampleTarget`, đợi dừng ở breakpoint, bấm **Add Watch** | Dòng `rc` xuất hiện trong cửa sổ Watch kèm giá trị `0` |
+| 13 | cmdLabel = `KHONGCO`, cmdVar = `%RC%`, **Tra & Chạy** → ở form "Thêm mapping mới" gõ `csharpLabel = NOSUCH`, `csharpVar = rc` → OK | Form báo đỏ `không thấy "NOSUCH:"`; `mapping.csv` không đổi |
+| 14 | Sửa `csharpLabel = END_PROC` (giữ `csharpVar = rc`) → OK | `mapping.csv` có thêm dòng `KHONGCO,%RC%,END_PROC,rc`; log `ĐÃ THÊM mapping…`; VS goto + breakpoint ở `END_PROC`; `Watch = rc` |
+| 15 | Sau bước 10: **F5** debug `SampleTarget`, đợi dừng ở breakpoint, bấm **Add Watch** | Dòng `rc` xuất hiện trong cửa sổ Watch kèm giá trị `0` |
 
 ## Ghi chú
 
