@@ -1,0 +1,35 @@
+# cmd input mẫu cho SendKeyDemo — dán cả file (hoặc từng đoạn) vào ô Batch.
+# Định dạng mỗi dòng:  cmdLabel <Tab> cmdVar
+#   - trống cmdVar = chỉ đặt breakpoint ở đầu label (không add watch)
+#   - dòng trống hoặc bắt đầu bằng # bị bỏ qua
+# Trỏ trong app:  mapping.csv + Program.cs của samples/BigSample
+
+# ---- Khối chạy chính: Program.cs (tất cả hợp lệ) ----
+INIT	%RC%
+READ_PARAMS	%PARAM_FILE%
+CHECK_INPUT	%INPUT_FILE%
+CHECK_INPUT	%RC%
+VALIDATE_HEADER	%HDR_OK%
+VALIDATE_DETAIL	%LINE_CNT%
+CALC_TAX	%TAX%
+CALC_TOTAL	%TOTAL%
+APPLY_DISCOUNT	%DISC%
+WRITE_OUTPUT	%OUT_FILE%
+HANDLE_ERROR	%RC%
+CLEANUP	%RC%
+END_PROC	%RC%
+
+# ---- Sang file Steps.cs (qua cột csharpFile trong mapping.csv) ----
+RECALC	%AMT%
+AUDIT_LOG	%MSG%
+ROLLBACK	%RC%
+
+# ---- Label-only: chỉ breakpoint, không watch ----
+CALC_TAX
+
+# ---- Mệnh đề if: khớp dòng  if "%RC%" NEQ "0"  trong mapping.csv ----
+CHECK_INPUT	if "%RC%" NEQ "0"
+
+# ---- Dòng lỗi để xem [LỖI] (batch bỏ qua, không popup) ----
+KHONG_CO_LABEL	%RC%
+CHECK_INPUT	%BIEN_SAI%

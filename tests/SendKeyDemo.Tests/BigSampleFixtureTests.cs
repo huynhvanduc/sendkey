@@ -56,6 +56,8 @@ public class BigSampleFixtureTests
 
         var paste = new[]
         {
+            "# khối test — dòng này bị bỏ qua",  // comment -> bỏ qua
+            "",                                   // dòng trống -> bỏ qua
             "CHECK_INPUT\t%RC%",
             "VALIDATE_DETAIL\t%LINE_CNT%",
             "CALC_TOTAL   %TOTAL%",              // ngăn bằng ≥2 dấu cách
@@ -69,6 +71,7 @@ public class BigSampleFixtureTests
         int ok = 0, fail = 0;
         foreach (var raw in paste)
         {
+            if (raw.Trim().Length == 0 || raw.TrimStart().StartsWith("#")) continue;
             var (lbl, v) = Mapping.SplitBatchLine(raw);
             var res = Mapping.Resolve(rows, lbl, v.Length == 0 ? null : v);
             if (res.Kind != LookupKind.Ok)

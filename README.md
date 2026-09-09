@@ -62,10 +62,10 @@ Tiện ích thêm:
 - **Copy Watch** — copy biểu thức ở ô `Watch` vào clipboard để tự `Ctrl+V` vào cửa sổ Watch
   (dùng khi `Add Watch` qua SendKeys bị chặn: VS chạy admin, mất foreground…).
 - **Batch…** — mở form dán nhiều dòng, mỗi dòng `cmdLabel <Tab> cmdVar` (hoặc ≥2 dấu cách;
-  trống `cmdVar` = chỉ đặt breakpoint ở label). Bấm **Chạy** → tra từng dòng, đặt breakpoint
-  cho mọi dòng hợp lệ (goto dòng đầu tiên), in bảng `[OK]/[LỖI]` + tổng kết. Tôn trọng
-  checkbox **Chỉ tra** (khi bật: chỉ liệt kê vị trí, không đụng VS). Không popup chọn biến /
-  thêm mapping giữa chừng — dòng nào hỏng thì báo lỗi và bỏ qua.
+  trống `cmdVar` = chỉ đặt breakpoint ở label). Dòng trống hoặc bắt đầu bằng `#` bị bỏ qua.
+  Bấm **Chạy** → tra từng dòng, đặt breakpoint cho mọi dòng hợp lệ (goto dòng đầu tiên),
+  in bảng `[OK]/[LỖI]` + tổng kết. Tôn trọng checkbox **Chỉ tra** (khi bật: chỉ liệt kê vị trí,
+  không đụng VS). Không popup chọn biến / thêm mapping giữa chừng — dòng nào hỏng thì báo lỗi và bỏ qua.
 - **Gần đây ▾** — menu 20 lần Tra & Chạy gần nhất (`cmdLabel | cmdVar`); chọn để điền lại
   nhanh. Lưu trong `settings.json`.
 - **Mở** (cạnh Browse) — mở `mapping.csv` / file `.cs` bằng ứng dụng mặc định của Windows.
@@ -77,6 +77,9 @@ trong `Steps.cs`, chạy `Thread.Sleep(120s)` ở cuối để kịp thao tác. 
 (17 dòng, **trộn 4 cột và 5 cột** — các dòng `Steps.cs` dùng cột `csharpFile`).
 Mở `samples/BigSample/BigSample.csproj` trong VS, trỏ app vào 2 file đó để thử mapping mode /
 Batch / Kiểm tra mapping.csv. (Test `BigSampleFixtureTests` đảm bảo mapping.csv luôn khớp code.)
+
+`samples/BigSample/cmd-input.txt` — khối `cmdLabel <Tab> cmdVar` dựng sẵn (có chú thích `#`,
+vài dòng lỗi cố ý): mở, copy, dán thẳng vào ô **Batch**.
 
 ## Kiểm thử thủ công
 

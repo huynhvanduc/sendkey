@@ -661,7 +661,7 @@ public class MainForm : Form
         };
         var hint = new Label
         {
-            Text = "Mỗi dòng: cmdLabel <Tab> cmdVar  (trống cmdVar = chỉ đặt breakpoint ở label)",
+            Text = "Mỗi dòng: cmdLabel <Tab> cmdVar  (trống cmdVar = breakpoint ở label; dòng trống / bắt đầu bằng # bị bỏ qua)",
             Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(2, 4, 2, 4)
         };
         var runBtn = new Button { Text = "Chạy", AutoSize = true, Margin = new Padding(0, 0, 6, 0) };
@@ -669,7 +669,9 @@ public class MainForm : Form
 
         runBtn.Click += (_, _) =>
         {
-            var lines = input.Lines.Where(l => l.Trim().Length > 0).ToArray();
+            var lines = input.Lines
+                .Where(l => l.Trim().Length > 0 && !l.TrimStart().StartsWith("#"))
+                .ToArray();
             int ok = 0, fail = 0, firstLine = 0;
             string firstCs = "";
             var sb = new System.Text.StringBuilder();
