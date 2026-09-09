@@ -393,7 +393,7 @@ public class MainForm : Form
                 tbCsFile.Focus(); return;
             }
 
-            var ll = Mapping.FindLabelLine(effCs, csL);
+            var ll = Mapping.FindLabelLine(effCs, csL, csV);
             switch (ll.Kind)
             {
                 case LabelLineKind.NotFound:
@@ -405,6 +405,9 @@ public class MainForm : Form
                 case LabelLineKind.NoExecutableLine:
                     err.Text = $"csharpLabel: sau \"{csL}:\" không còn dòng thực thi.";
                     tbCsLabel.Focus(); return;
+                case LabelLineKind.AnchorNotFound:
+                    err.Text = $"csharpVar: không thấy biểu thức \"{csV}\" sau \"{csL}:\".";
+                    tbCsVar.Focus(); return;
             }
 
             result = new MapRow(cmdL, cmdV, csL, csV, 0, csFile);
@@ -521,7 +524,7 @@ public class MainForm : Form
             return;
         }
 
-        var lineRes = Mapping.FindLabelLine(csp, row.CsharpLabel);
+        var lineRes = Mapping.FindLabelLine(csp, row.CsharpLabel, row.CsharpVar);
         if (lineRes.Kind == LabelLineKind.NotFound)
         {
             Log($"Tra & Chạy: không thấy label \"{row.CsharpLabel}:\" trong {Path.GetFileName(csp)}.");
@@ -535,6 +538,11 @@ public class MainForm : Form
         if (lineRes.Kind == LabelLineKind.NoExecutableLine)
         {
             Log($"Tra & Chạy: sau label \"{row.CsharpLabel}\" không còn dòng thực thi.");
+            return;
+        }
+        if (lineRes.Kind == LabelLineKind.AnchorNotFound)
+        {
+            Log($"Tra & Chạy: không thấy biểu thức \"{row.CsharpVar}\" sau label \"{row.CsharpLabel}:\" trong {Path.GetFileName(csp)}.");
             return;
         }
         int line = lineRes.Line;
@@ -628,12 +636,13 @@ public class MainForm : Form
         var csp = EffectiveCsPath(row);
         if (string.IsNullOrWhiteSpace(csp) || !File.Exists(csp))
             return (null, 0, $"không thấy file .cs: {csp}");
-        var ll = Mapping.FindLabelLine(csp, row.CsharpLabel);
+        var ll = Mapping.FindLabelLine(csp, row.CsharpLabel, row.CsharpVar);
         return ll.Kind switch
         {
             LabelLineKind.NotFound => (null, 0, $"không thấy \"{row.CsharpLabel}:\" trong {Path.GetFileName(csp)}"),
             LabelLineKind.Multiple => (null, 0, $"\"{row.CsharpLabel}:\" xuất hiện nhiều lần trong {Path.GetFileName(csp)}"),
             LabelLineKind.NoExecutableLine => (null, 0, $"sau \"{row.CsharpLabel}:\" không còn dòng thực thi"),
+            LabelLineKind.AnchorNotFound => (null, 0, $"không thấy biểu thức \"{row.CsharpVar}\" sau \"{row.CsharpLabel}:\""),
             _ => (row, ll.Line, null),
         };
     }

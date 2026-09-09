@@ -64,6 +64,7 @@ public class BigSampleFixtureTests
             "APPLY_DISCOUNT",                    // label-only
             "RECALC\t%AMT%",                     // sang Steps.cs qua csharpFile
             "AUDIT_LOG\t%MSG%",                  // sang Steps.cs
+            "CHECK_INPUT\tif \"%RC%\" NEQ \"0\"",// mệnh đề if -> anchor tới dòng "if (rc != 0)"
             "NOPE\t%RC%",                        // label không có -> LỖI
             "CHECK_INPUT\t%WRONGVAR%",           // var không khớp -> LỖI
         };
@@ -82,19 +83,19 @@ public class BigSampleFixtureTests
             }
             var row = res.Row!;
             var csFile = row.CsharpFile.Length == 0 ? "Program.cs" : row.CsharpFile;
-            var ll = Mapping.FindLabelLine(Path.Combine(Dir, csFile), row.CsharpLabel);
+            var ll = Mapping.FindLabelLine(Path.Combine(Dir, csFile), row.CsharpLabel, row.CsharpVar);
             if (ll.Kind != LabelLineKind.Ok)
             {
-                _out.WriteLine($"[LỖI] {raw,-28} — {ll.Kind} @ {csFile}");
+                _out.WriteLine($"[LỖI] {raw,-34} — {ll.Kind} @ {csFile}");
                 fail++;
                 continue;
             }
-            _out.WriteLine($"[OK]  {raw,-28} → {csFile}:{ll.Line}  (watch: {row.CsharpVar})");
+            _out.WriteLine($"[OK]  {raw,-34} → {csFile}:{ll.Line}  (watch: {row.CsharpVar})");
             ok++;
         }
         _out.WriteLine($"\nTổng: {ok} OK, {fail} lỗi / {paste.Length} dòng.");
 
-        Assert.Equal(6, ok);
+        Assert.Equal(7, ok);
         Assert.Equal(2, fail);
     }
 }

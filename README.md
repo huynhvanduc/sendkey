@@ -32,7 +32,10 @@ Dùng khi chụp Unit Test cho code batch đã migrate sang C# (giữ `nhãn:` +
 
 1. **mapping.csv** — 4 hoặc 5 cột, 1 dòng header: `cmdLabel,cmdVar,csharpLabel,csharpVar[,csharpFile]`.
    - `cmdVar`: token biến batch (`%RC%`) hoặc nguyên mệnh đề `if`.
-   - `csharpVar`: định danh C# hoặc biểu thức C# đã dịch sẵn (cho mệnh đề `if`).
+   - `csharpVar`: định danh C# **hoặc** biểu thức C# đã dịch sẵn (cho mệnh đề `if`).
+     Nếu là biểu thức (có toán tử / khoảng trắng, vd `rc != 0`), tool quét từ dòng đầu
+     label xuống, đặt breakpoint ở **dòng đầu tiên chứa biểu thức đó** (vd dòng
+     `if (rc != 0) goto …`) thay vì dòng đầu label. Định danh thuần → dòng đầu label như cũ.
    - `csharpFile` (tùy chọn): đường dẫn file `.cs` cho riêng dòng đó — tuyệt đối, hoặc
      tương đối theo thư mục chứa `mapping.csv`. Trống = dùng ô **target .cs**. Dùng khi
      code migrate nằm rải nhiều file. Trộn dòng 4 cột và 5 cột trong cùng file được.

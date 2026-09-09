@@ -9,7 +9,7 @@ public record MapRow(string CmdLabel, string CmdVar, string CsharpLabel, string 
 
 public enum LookupKind { NotFoundLabel, NeedPickVar, Duplicate, Ok }
 
-public enum LabelLineKind { NotFound, Multiple, NoExecutableLine, Ok }
+public enum LabelLineKind { NotFound, Multiple, NoExecutableLine, AnchorNotFound, Ok }
 
 public record LabelLineResult(LabelLineKind Kind, int Line = 0, IReadOnlyList<int>? MatchLines = null);
 
@@ -123,10 +123,22 @@ public static class Mapping
         File.AppendAllText(csvPath, prefix + line + "\n", new UTF8Encoding(false));
     }
 
-    public static LabelLineResult FindLabelLine(string csPath, string csharpLabel)
-        => FindLabelLineInText(File.ReadAllLines(csPath), csharpLabel);
+    static readonly Regex _plainIdent = new(@"^[A-Za-z_][\w.]*$");
+    static readonly Regex _anyLabel = new(@"^\s*[A-Za-z_]\w*\s*:");
 
-    public static LabelLineResult FindLabelLineInText(IReadOnlyList<string> lines, string csharpLabel)
+    /// <summary>true nếu s là biểu thức (có toán tử / khoảng trắng…), không phải định danh C# thuần.</summary>
+    public static bool IsExpression(string? s)
+        => !string.IsNullOrWhiteSpace(s) && !_plainIdent.IsMatch(s!.Trim());
+
+    public static LabelLineResult FindLabelLine(string csPath, string csharpLabel, string? anchorExpr = null)
+        => FindLabelLineInText(File.ReadAllLines(csPath), csharpLabel, anchorExpr);
+
+    /// <summary>
+    /// Tra dòng breakpoint cho <paramref name="csharpLabel"/>. Nếu <paramref name="anchorExpr"/> là
+    /// biểu thức (vd "rc != 0") thì quét từ dòng đầu label xuống, dừng ở dòng đầu tiên chứa biểu thức đó
+    /// (khớp cả khi cách nhau khoảng trắng khác nhau); không thấy → AnchorNotFound.
+    /// </summary>
+    public static LabelLineResult FindLabelLineInText(IReadOnlyList<string> lines, string csharpLabel, string? anchorExpr = null)
     {
         var rx = new Regex($@"^\s*{Regex.Escape(csharpLabel)}\s*:");
         var matches = new List<int>();
@@ -136,15 +148,42 @@ public static class Mapping
         if (matches.Count == 0) return new LabelLineResult(LabelLineKind.NotFound);
         if (matches.Count > 1) return new LabelLineResult(LabelLineKind.Multiple, MatchLines: matches);
 
-        int start = matches[0];                       // 1-based dòng nhãn
-        var labelLine = lines[start - 1];
+        int firstExec = FirstExecLine(lines, matches[0]);
+        if (firstExec == 0) return new LabelLineResult(LabelLineKind.NoExecutableLine);
+
+        if (IsExpression(anchorExpr))
+        {
+            var aOne = _ws.Replace(anchorExpr!.Trim(), " ");
+            var aNo = _ws.Replace(anchorExpr!, "");
+            bool inBlock = false;
+            for (int ln = firstExec; ln <= lines.Count; ln++)
+            {
+                var raw = lines[ln - 1];
+                var t = raw.Trim();
+                if (inBlock) { if (t.Contains("*/")) inBlock = false; continue; }
+                if (ln != firstExec && _anyLabel.IsMatch(raw) && t != "default:" && !t.StartsWith("case "))
+                    break;                                   // đã sang nhãn / case khác
+                if (t.StartsWith("//")) continue;
+                if (t.StartsWith("/*")) { if (!t.Contains("*/")) inBlock = true; continue; }
+                if (_ws.Replace(t, " ").Contains(aOne) || _ws.Replace(t, "").Contains(aNo))
+                    return new LabelLineResult(LabelLineKind.Ok, ln);
+            }
+            return new LabelLineResult(LabelLineKind.AnchorNotFound);
+        }
+
+        return new LabelLineResult(LabelLineKind.Ok, firstExec);
+    }
+
+    /// <summary>Dòng thực thi đầu tiên tại/sau dòng nhãn (1-based); 0 nếu không còn dòng nào.</summary>
+    static int FirstExecLine(IReadOnlyList<string> lines, int labelLineNo)
+    {
+        var labelLine = lines[labelLineNo - 1];
         int colon = labelLine.IndexOf(':');
         var tail = colon >= 0 ? labelLine[(colon + 1)..].Trim() : "";
-        if (tail.Length > 0 && !tail.StartsWith("//"))
-            return new LabelLineResult(LabelLineKind.Ok, start);
+        if (tail.Length > 0 && !tail.StartsWith("//")) return labelLineNo;
 
         bool inBlock = false;
-        for (int ln = start + 1; ln <= lines.Count; ln++)
+        for (int ln = labelLineNo + 1; ln <= lines.Count; ln++)
         {
             var t = lines[ln - 1].Trim();
             if (inBlock) { if (t.Contains("*/")) inBlock = false; continue; }
@@ -153,9 +192,9 @@ public static class Mapping
             if (t.StartsWith("#")) continue;                 // #pragma / #region / #if …
             if (t.StartsWith("/*")) { if (!t.Contains("*/")) inBlock = true; continue; }
             if (t == "{") continue;
-            return new LabelLineResult(LabelLineKind.Ok, ln);
+            return ln;
         }
-        return new LabelLineResult(LabelLineKind.NoExecutableLine);
+        return 0;
     }
 
     /// <summary>Soát mapping.csv: cặp trùng, và label không tra được trong file .cs (linesFor trả null = bỏ qua dòng đó).</summary>
@@ -173,7 +212,7 @@ public static class Mapping
         {
             var lines = linesFor(r);
             if (lines == null) continue;
-            var ll = FindLabelLineInText(lines, r.CsharpLabel);
+            var ll = FindLabelLineInText(lines, r.CsharpLabel, r.CsharpVar);
             switch (ll.Kind)
             {
                 case LabelLineKind.NotFound:
@@ -184,6 +223,9 @@ public static class Mapping
                     break;
                 case LabelLineKind.NoExecutableLine:
                     problems.Add($"dòng {r.SourceLine}: sau \"{r.CsharpLabel}:\" không còn dòng thực thi");
+                    break;
+                case LabelLineKind.AnchorNotFound:
+                    problems.Add($"dòng {r.SourceLine}: không thấy biểu thức \"{r.CsharpVar}\" sau \"{r.CsharpLabel}:\"");
                     break;
             }
         }

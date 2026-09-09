@@ -241,6 +241,60 @@ public class MappingTests
         Assert.Equal(4, r.Line);
     }
 
+    static readonly string[] _labelBlock =
+    {
+        "    CHECK_INPUT:",                          // 1
+        "        inputFile = \"orders.csv\";",       // 2
+        "        rc = inputFile.Length > 3 ? 0 : 1;",// 3
+        "        Console.WriteLine(rc);",            // 4
+        "        if (rc != 0) goto ERR;",            // 5
+        "",                                          // 6
+        "    NEXT_STEP:",                            // 7
+        "        if (rc != 0) goto ERR;",            // 8  (không được chạm — đã sang nhãn khác)
+    };
+
+    [Fact]
+    public void FindLabelLine_plain_identifier_anchors_at_label_first_line()
+    {
+        var r = Mapping.FindLabelLineInText(_labelBlock, "CHECK_INPUT", "rc");
+        Assert.Equal(LabelLineKind.Ok, r.Kind);
+        Assert.Equal(2, r.Line);
+    }
+
+    [Fact]
+    public void FindLabelLine_expression_anchor_jumps_to_matching_line()
+    {
+        var r = Mapping.FindLabelLineInText(_labelBlock, "CHECK_INPUT", "rc != 0");
+        Assert.Equal(LabelLineKind.Ok, r.Kind);
+        Assert.Equal(5, r.Line);
+    }
+
+    [Fact]
+    public void FindLabelLine_expression_anchor_matches_despite_spacing()
+    {
+        var src = new[] { "  L:", "  a = 1;", "  if(rc!=0) return;" };
+        var r = Mapping.FindLabelLineInText(src, "L", "rc != 0");
+        Assert.Equal(LabelLineKind.Ok, r.Kind);
+        Assert.Equal(3, r.Line);
+    }
+
+    [Fact]
+    public void FindLabelLine_expression_anchor_not_found_stops_at_next_label()
+    {
+        var src = new[] { "  L:", "  a = 1;", "  M:", "  x == 9;" };
+        var r = Mapping.FindLabelLineInText(src, "L", "x == 9");
+        Assert.Equal(LabelLineKind.AnchorNotFound, r.Kind);
+    }
+
+    [Theory]
+    [InlineData("rc", false)]
+    [InlineData("order.Total", false)]
+    [InlineData("rc != 0", true)]
+    [InlineData("a && b", true)]
+    [InlineData("", false)]
+    public void IsExpression_cases(string s, bool expected)
+        => Assert.Equal(expected, Mapping.IsExpression(s));
+
     [Theory]
     [InlineData(" :Check Input : ", "Check Input")]
     [InlineData("CHECK_INPUT", "CHECK_INPUT")]
