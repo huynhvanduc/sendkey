@@ -126,6 +126,101 @@ public static class VsAutomation
         return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
     }
 
+    /// <summary>Xóa mọi breakpoint trong file rồi đặt đúng 1 cái ở <paramref name="line"/> — dùng cho chế độ chụp.</summary>
+    public static string SetOnlyBreakpoint(DTE dte, string file, int line)
+    {
+        if (!File.Exists(file)) return $"file không tồn tại: {file}";
+        ClearBreakpointsInFile(dte, file);
+        return EnsureBreakpoint(dte, file, line);
+    }
+
+    /// <summary>
+    /// Đọc trạng thái debugger để gác cổng trước khi chụp. Toàn read-only, không đổi gì phía VS.
+    /// </summary>
+    public static DebugSnapshot ReadDebugState(DTE dte, string csFile, string expr)
+    {
+        try
+        {
+            var dbg = dte.Debugger;
+            bool inBreak = dbg.CurrentMode == dbgDebugMode.dbgBreakMode;
+
+            // Breakpoint nào vừa làm chương trình dừng — chính xác hơn nhiều so với đọc vị trí con trỏ,
+            // vì con trỏ có thể đã bị người dùng click đi chỗ khác.
+            string hitFile = "";
+            int hitLine = 0;
+            if (inBreak)
+            {
+                try
+                {
+                    var hit = dbg.BreakpointLastHit;
+                    if (hit != null) { hitFile = hit.File ?? ""; hitLine = hit.FileLine; }
+                }
+                catch (COMException) { /* dừng không do breakpoint */ }
+            }
+
+            int bpInFile = 0;
+            try
+            {
+                foreach (Breakpoint bp in dbg.Breakpoints)
+                {
+                    try
+                    {
+                        if (string.Equals(bp.File, csFile, StringComparison.OrdinalIgnoreCase)) bpInFile++;
+                    }
+                    catch (COMException) { /* breakpoint kiểu hàm — không có File */ }
+                }
+            }
+            catch (COMException) { /* chưa có collection */ }
+
+            bool exprValid = false;
+            string exprValue = "";
+            if (inBreak && !string.IsNullOrWhiteSpace(expr))
+            {
+                try
+                {
+                    var e = dbg.GetExpression(expr, true, 2000);
+                    exprValid = e.IsValidValue;
+                    if (exprValid) exprValue = e.Value ?? "";
+                }
+                catch (COMException) { /* biểu thức không evaluate được ở frame hiện tại */ }
+            }
+
+            int pid = 0;
+            try { pid = dbg.CurrentProcess?.ProcessID ?? 0; }
+            catch (COMException) { /* chưa chạy */ }
+
+            return new DebugSnapshot(true, inBreak, hitFile, hitLine, bpInFile, exprValid, exprValue, pid);
+        }
+        catch (Exception ex)
+        {
+            return DebugSnapshot.Unavailable("Không đọc được trạng thái VS: " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Bám sự kiện VS dừng ở breakpoint để tự chấm mà không cần người dùng bấm gì.
+    /// QUAN TRỌNG: phải giữ instance này trong một field — thả ra là GC dọn mất
+    /// đối tượng events và sự kiện im lặng ngừng bắn.
+    /// </summary>
+    public sealed class BreakWatcher : IDisposable
+    {
+        readonly DebuggerEvents _events;                                        // giữ tham chiếu, đừng để GC dọn
+        readonly _dispDebuggerEvents_OnEnterBreakModeEventHandler _onBreak;
+
+        public BreakWatcher(DTE dte, Action onEnterBreak)
+        {
+            _events = dte.Events.DebuggerEvents;
+            _onBreak = (dbgEventReason reason, ref dbgExecutionAction action) => onEnterBreak();
+            _events.OnEnterBreakMode += _onBreak;
+        }
+
+        public void Dispose()
+        {
+            try { _events.OnEnterBreakMode -= _onBreak; }
+            catch (Exception) { /* VS đã đóng */ }
+        }
+    }
+
     // Watch window kind GUID (EnvDTE.Constants.vsWindowKindWatch)
     const string WatchWindowKind = "{90243340-BD7A-11D0-93EF-00A0C90F2734}";
 
@@ -148,7 +243,12 @@ public static class VsAutomation
             win.Visible = true;
             win.Activate();
         }
-        catch (COMException) { /* chưa mở cửa sổ Watch nào — bỏ qua */ }
+        catch (COMException)
+        {
+            // Chưa từng mở cửa sổ Watch nào -> Windows.Item ném. Gọi lệnh menu để VS tự tạo Watch 1.
+            try { dte.ExecuteCommand("Debug.Watch1"); }
+            catch (COMException) { /* vẫn không mở được — người dùng tự mở */ }
+        }
 
         return copied
             ? $"đã copy \"{expression}\" + mở cửa sổ Watch — bấm Ctrl+V rồi Enter (không gõ tự động để tránh sửa nhầm file .cs)."

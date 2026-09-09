@@ -484,3 +484,6 @@ $RECYCLE.BIN/
 *.swp
 
 .superpowers/
+
+# QuickShot gốc (đã gộp vào src/SendKeyDemo) - repo git lồng, giữ lại để tham chiếu
+files/

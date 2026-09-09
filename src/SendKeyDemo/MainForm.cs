@@ -1,9 +1,10 @@
 using System.Runtime.InteropServices;
 using EnvDTE;
+using QuickShot;
 
 namespace SendKeyDemo;
 
-public class MainForm : Form
+public class MainForm : Form, IEvidenceHost
 {
     readonly ComboBox _instances = new() { Width = 560, DropDownStyle = ComboBoxStyle.DropDownList };
     readonly Button _refresh = new() { Text = "Refresh", AutoSize = true };
@@ -44,6 +45,15 @@ public class MainForm : Form
     string _mapRowsPath = "";
     DateTime _mapRowsMtime;
 
+    // --- chụp bằng chứng (gộp từ QuickShot) ---
+    readonly Button _evidenceBtn = new() { Text = "Chụp bằng chứng…", AutoSize = true };
+    readonly NotifyIcon _tray = new() { Visible = true, Text = "SendKey Evidence" };
+    HotkeyWindow _hotkeys = new();
+    EvidenceSession? _evidence;
+    AppSettings _settings = new();
+    Rectangle? _savedRegion;      // vùng chụp đã khoanh, dùng lại cho mọi lần chụp
+    bool _reallyExit;             // false = bấm X thì thu về tray, không thoát
+
     public MainForm()
     {
         Text = "VS SendKey Automation Demo";
@@ -81,6 +91,7 @@ public class MainForm : Form
         mapBtns.Controls.Add(_run);
         mapBtns.Controls.Add(_recentBtn);
         mapBtns.Controls.Add(_batch);
+        mapBtns.Controls.Add(_evidenceBtn);
         mapBtns.Controls.Add(_checkMapping);
         mapGrid.Controls.Add(mapBtns, 1, 4);
 
@@ -145,23 +156,169 @@ public class MainForm : Form
         _targetCs.TextChanged += (_, _) => SaveSettings();
         _topMostBox.CheckedChanged += (_, _) => { TopMost = _topMostBox.Checked; SaveSettings(); };
         _run.Click += (_, _) => TraVaChay();
+        _evidenceBtn.Click += (_, _) => EvidenceDialog();
         _cmdLabel.KeyDown += MappingKeyDown;
         _cmdVar.KeyDown += MappingKeyDown;
+        _instances.SelectedIndexChanged += (_, _) => _evidence?.AttachWatcher();
 
         Load += (_, _) =>
         {
             _loading = true;
-            var s = AppSettings.Load();
-            _mappingPath.Text = s.MappingPath ?? "";
-            _targetCs.Text = s.TargetCsPath ?? "";
-            _topMostBox.Checked = s.TopMost;
-            TopMost = s.TopMost;
-            _recent.AddRange(s.RecentLookups);
+            _settings = AppSettings.Load();
+            _mappingPath.Text = _settings.MappingPath ?? "";
+            _targetCs.Text = _settings.TargetCsPath ?? "";
+            _topMostBox.Checked = _settings.TopMost;
+            TopMost = _settings.TopMost;
+            _recent.AddRange(_settings.RecentLookups);
             _recentBtn.Enabled = _recent.Count > 0;
             _loading = false;
 
+            _evidence = new EvidenceSession(this, _settings);
+            _evidence.Bar.OpenConfigRequested += ShowConfigWindow;
+
+            BuildTray();
+            var hotkeyProblem = RegisterHotkeys();
+            if (hotkeyProblem != null) Log("Hotkey: " + hotkeyProblem);
+
             VsAutomation.OleMessageFilter.Register();
             LoadInstances();
+            _evidence.AttachWatcher();
+        };
+    }
+
+    DTE? CurrentDte() => (_instances.SelectedItem as VsInstance)?.Dte;
+
+    // ---- IEvidenceHost: những gì EvidenceSession cần từ cửa sổ này ----
+
+    DTE? IEvidenceHost.Dte => CurrentDte();
+    IReadOnlyList<MapRow>? IEvidenceHost.Rows => GetMapRows();
+    string IEvidenceHost.CsPathOf(MapRow row) => EffectiveCsPath(row);
+    Rectangle? IEvidenceHost.Region => _savedRegion;
+    void IEvidenceHost.Log(string msg) => Log(msg);
+
+    /// <summary>
+    /// Ghi thêm 1 dòng mapping từ thanh chụp bằng chứng (không popup): validate csharpLabel/csharpVar
+    /// với file .cs đích trước, hỏng thì trả lý do để thanh hiện lên. Dòng mới dùng ô "target .cs"
+    /// (muốn cột csharpFile riêng thì thêm qua "Tra & Chạy").
+    /// </summary>
+    string? IEvidenceHost.AddMapping(string cmdLabel, string cmdVar, string csLabel, string csVar)
+    {
+        var mappingCsv = _mappingPath.Text.Trim();
+        if (mappingCsv.Length == 0 || !File.Exists(mappingCsv)) return "Chưa trỏ mapping.csv ở cửa sổ cấu hình.";
+
+        var cmdL = Mapping.CleanLabel(cmdLabel);
+        var cmdV = cmdVar.Trim();
+        var csL = Mapping.CleanLabel(csLabel);
+        var csV = csVar.Trim();
+        if (cmdL.Length == 0) return "cmdLabel đang trống.";
+        if (csL.Length == 0 || csV.Length == 0) return "csharpLabel / csharpVar không được để trống.";
+
+        var csPath = _targetCs.Text.Trim();
+        if (csPath.Length == 0 || !File.Exists(csPath)) return $"Không thấy file .cs đích: {csPath}";
+
+        var ll = Mapping.FindLabelLine(csPath, csL, csV);
+        switch (ll.Kind)
+        {
+            case LabelLineKind.NotFound:
+                return $"Không thấy \"{csL}:\" trong {Path.GetFileName(csPath)}.";
+            case LabelLineKind.Multiple:
+                return $"\"{csL}:\" xuất hiện ở dòng {string.Join(", ", ll.MatchLines!)} — sửa code hoặc dùng csharpFile.";
+            case LabelLineKind.NoExecutableLine:
+                return $"Sau \"{csL}:\" không còn dòng thực thi.";
+            case LabelLineKind.AnchorNotFound:
+                return $"Không thấy biểu thức \"{csV}\" sau \"{csL}:\".";
+        }
+
+        try
+        {
+            Mapping.AppendRow(mappingCsv, new MapRow(cmdL, cmdV, csL, csV, 0));
+            _mapRows = null;   // buộc GetMapRows nạp lại
+            Log($"ĐÃ THÊM mapping: {cmdL} / {cmdV} → {csL} / {csV} — kiểm tra lại bản dịch csharpVar.");
+            return null;
+        }
+        catch (IOException)
+        {
+            return "Không ghi được mapping.csv (đang mở trong Excel?) — đóng Excel rồi Enter lại.";
+        }
+        catch (Exception ex)
+        {
+            return "Lỗi ghi mapping.csv: " + ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Tra 1 cặp cmdLabel/cmdVar CÓ TƯƠNG TÁC — dùng chung cho "Tra & Chạy" và chế độ chụp bằng chứng:
+    /// không thấy label → mở form "Thêm mapping mới" (ghi thêm dòng vào mapping.csv rồi chạy tiếp);
+    /// cmdVar không khớp → cho chọn trong danh sách biến của label đó (kèm "+ Thêm biến mới…").
+    /// </summary>
+    (MapRow? Row, int Line, string? Error) ResolveInteractive(string labelRaw, string? varRaw, out bool varEstablished)
+    {
+        varEstablished = false;
+
+        var rows = GetMapRows();
+        if (rows == null) return (null, 0, "không nạp được mapping.csv");
+
+        var csPath = _targetCs.Text.Trim();
+        var res = Mapping.Resolve(rows, labelRaw, varRaw);
+
+        MapRow row;
+        switch (res.Kind)
+        {
+            case LookupKind.Duplicate:
+                return (null, 0, $"mapping trùng dòng {string.Join(", ", res.DuplicateLines!)}");
+
+            case LookupKind.NotFoundLabel:
+            {
+                var added = AddMappingDialog(csPath, _mappingPath.Text.Trim(), labelRaw, varRaw ?? "", rows);
+                if (added == null) return (null, 0, "đã hủy thêm mapping");
+                row = SaveAddedRow(added);
+                varEstablished = true;
+                break;
+            }
+
+            case LookupKind.NeedPickVar:
+            {
+                var pick = PickFromList($"Chọn biến của label {labelRaw}", res.VarChoices!, out var addNew);
+                if (addNew)
+                {
+                    var added = AddMappingDialog(csPath, _mappingPath.Text.Trim(), labelRaw, varRaw ?? "", rows);
+                    if (added == null) return (null, 0, "đã hủy thêm mapping");
+                    row = SaveAddedRow(added);
+                }
+                else
+                {
+                    if (pick == null) return (null, 0, "đã hủy chọn biến");
+                    _cmdVar.Text = pick;
+                    var re = Mapping.Resolve(rows, labelRaw, pick);
+                    if (re.Kind != LookupKind.Ok) return (null, 0, "vẫn không khớp sau khi chọn biến");
+                    row = re.Row!;
+                }
+                varEstablished = true;
+                break;
+            }
+
+            default:
+                row = res.Row!;
+                if (res.Warning != null) Log("Tra: " + res.Warning);
+                break;
+        }
+
+        var csp = EffectiveCsPath(row);
+        if (string.IsNullOrWhiteSpace(csp) || !File.Exists(csp))
+            return (null, 0, $"không thấy file .cs cho dòng này: {csp}");
+
+        var ll = Mapping.FindLabelLine(csp, row.CsharpLabel, row.CsharpVar);
+        return ll.Kind switch
+        {
+            LabelLineKind.NotFound =>
+                (null, 0, $"không thấy \"{row.CsharpLabel}:\" trong {Path.GetFileName(csp)}"),
+            LabelLineKind.Multiple =>
+                (null, 0, $"\"{row.CsharpLabel}:\" xuất hiện ở dòng {string.Join(", ", ll.MatchLines!)}"),
+            LabelLineKind.NoExecutableLine =>
+                (null, 0, $"sau \"{row.CsharpLabel}:\" không còn dòng thực thi"),
+            LabelLineKind.AnchorNotFound =>
+                (null, 0, $"không thấy biểu thức \"{row.CsharpVar}\" sau \"{row.CsharpLabel}:\""),
+            _ => (row, ll.Line, null),
         };
     }
 
@@ -177,13 +334,12 @@ public class MainForm : Form
     void SaveSettings()
     {
         if (_loading) return;
-        new AppSettings
-        {
-            MappingPath = _mappingPath.Text,
-            TargetCsPath = _targetCs.Text,
-            TopMost = _topMostBox.Checked,
-            RecentLookups = _recent.ToArray()
-        }.Save();
+        // Sửa trên đối tượng đã nạp, KHÔNG tạo mới — tạo mới sẽ xóa mất phần cấu hình hotkey/chụp.
+        _settings.MappingPath = _mappingPath.Text;
+        _settings.TargetCsPath = _targetCs.Text;
+        _settings.TopMost = _topMostBox.Checked;
+        _settings.RecentLookups = _recent.ToArray();
+        _settings.Save();
     }
 
     void PushRecent(string label, string var)
@@ -475,77 +631,15 @@ public class MainForm : Form
         var varRaw = _cmdVar.Text.Trim();
         bool labelOnly = varRaw.Length == 0;
 
-        var res = Mapping.Resolve(rows, labelRaw, labelOnly ? null : varRaw);
-
-        if (res.Kind == LookupKind.Duplicate)
+        var (row, line, error) = ResolveInteractive(labelRaw, labelOnly ? null : varRaw, out var varEstablished);
+        if (error != null || row == null)
         {
-            Log($"Tra & Chạy: mapping trùng dòng {string.Join(", ", res.DuplicateLines!)}.");
+            Log("Tra & Chạy: " + error + ".");
             return;
         }
-
-        MapRow row;
-        if (res.Kind == LookupKind.NotFoundLabel)
-        {
-            var added = AddMappingDialog(csPath, _mappingPath.Text.Trim(), labelRaw, labelOnly ? "" : varRaw, rows);
-            if (added == null) { Log("Tra & Chạy: đã hủy thêm mapping."); return; }
-            row = SaveAddedRow(added);
-            labelOnly = false;
-        }
-        else if (res.Kind == LookupKind.NeedPickVar)
-        {
-            var pick = PickFromList($"Chọn biến của label {labelRaw}", res.VarChoices!, out var addNew);
-            if (addNew)
-            {
-                var added = AddMappingDialog(csPath, _mappingPath.Text.Trim(), labelRaw, varRaw, rows);
-                if (added == null) { Log("Tra & Chạy: đã hủy thêm mapping."); return; }
-                row = SaveAddedRow(added);
-            }
-            else
-            {
-                if (pick == null) { Log("Tra & Chạy: đã hủy chọn biến."); return; }
-                _cmdVar.Text = pick;
-                var re = Mapping.Resolve(rows, labelRaw, pick);
-                if (re.Kind != LookupKind.Ok) { Log("Tra & Chạy: vẫn không khớp sau khi chọn biến."); return; }
-                row = re.Row!;
-            }
-            labelOnly = false;
-        }
-        else
-        {
-            row = res.Row!;
-        }
-
-        if (res.Warning != null) Log("Tra & Chạy: " + res.Warning);
+        if (varEstablished) labelOnly = false;
 
         var csp = EffectiveCsPath(row);            // dòng có csharpFile → dùng file đó, không thì ô "target .cs"
-        if (string.IsNullOrWhiteSpace(csp) || !File.Exists(csp))
-        {
-            Log($"Tra & Chạy: không thấy file .cs cho dòng này: {csp}");
-            return;
-        }
-
-        var lineRes = Mapping.FindLabelLine(csp, row.CsharpLabel, row.CsharpVar);
-        if (lineRes.Kind == LabelLineKind.NotFound)
-        {
-            Log($"Tra & Chạy: không thấy label \"{row.CsharpLabel}:\" trong {Path.GetFileName(csp)}.");
-            return;
-        }
-        if (lineRes.Kind == LabelLineKind.Multiple)
-        {
-            Log($"Tra & Chạy: label \"{row.CsharpLabel}:\" xuất hiện ở dòng {string.Join(", ", lineRes.MatchLines!)}.");
-            return;
-        }
-        if (lineRes.Kind == LabelLineKind.NoExecutableLine)
-        {
-            Log($"Tra & Chạy: sau label \"{row.CsharpLabel}\" không còn dòng thực thi.");
-            return;
-        }
-        if (lineRes.Kind == LabelLineKind.AnchorNotFound)
-        {
-            Log($"Tra & Chạy: không thấy biểu thức \"{row.CsharpVar}\" sau label \"{row.CsharpLabel}:\" trong {Path.GetFileName(csp)}.");
-            return;
-        }
-        int line = lineRes.Line;
 
         _file.Text = csp;
         _line.Value = Math.Min(line, (int)_line.Maximum);
@@ -775,6 +869,232 @@ public class MainForm : Form
         {
             Log($"{label} LỖI: {ex.Message}");
         }
+    }
+
+    // ==================== chụp bằng chứng: tray + hotkey + worklist ====================
+
+    static Icon LoadAppIcon()
+    {
+        using var s = typeof(MainForm).Assembly.GetManifestResourceStream("SendKeyDemo.app_runtime.ico");
+        return s != null ? new Icon(s) : SystemIcons.Application;
+    }
+
+    void BuildTray()
+    {
+        _tray.Icon = LoadAppIcon();
+        Icon = _tray.Icon;
+
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Cửa sổ cấu hình", null, (_, _) => ShowConfigWindow());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add($"Chụp bằng chứng… ({_settings.CaptureRegionHotkey})", null, (_, _) => EvidenceDialog());
+        menu.Items.Add("Dừng đợt chụp", null, (_, _) => StopEvidence());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add($"Khoanh vùng chụp ({_settings.DefineRegionHotkey})", null, (_, _) => DefineRegion());
+        menu.Items.Add($"Chụp toàn màn hình ({_settings.FullScreenHotkey})", null,
+            (_, _) => PlainCapture(ScreenCapture.CursorScreenBounds()));
+        menu.Items.Add($"Chụp cửa sổ hiện tại ({_settings.ActiveWindowHotkey})", null, (_, _) => CaptureActiveWindow());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Thoát", null, (_, _) => { _reallyExit = true; Close(); });
+
+        _tray.ContextMenuStrip = menu;
+        _tray.DoubleClick += (_, _) => ShowConfigWindow();
+    }
+
+    string? RegisterHotkeys()
+    {
+        _hotkeys.Dispose();
+        _hotkeys = new HotkeyWindow();
+        var defaults = new AppSettings();
+        var failed = new List<string>();
+
+        RegisterOne(_settings.DefineRegionHotkey, defaults.DefineRegionHotkey, "Khoanh vùng", DefineRegion, failed);
+        RegisterOne(_settings.CaptureRegionHotkey, defaults.CaptureRegionHotkey, "Chụp", CaptureHotkey, failed);
+        RegisterOne(_settings.FullScreenHotkey, defaults.FullScreenHotkey, "Chụp toàn màn hình",
+            () => PlainCapture(ScreenCapture.CursorScreenBounds()), failed);
+        RegisterOne(_settings.ActiveWindowHotkey, defaults.ActiveWindowHotkey, "Chụp cửa sổ", CaptureActiveWindow, failed);
+        RegisterOne(_settings.GotoCurrentHotkey, defaults.GotoCurrentHotkey, "Chạy cặp đang chọn",
+            () => _evidence?.Run(), failed);
+
+        return failed.Count > 0 ? "không đăng ký được: " + string.Join("; ", failed) : null;
+    }
+
+    void RegisterOne(string spec, string fallback, string label, Action action, List<string> failed)
+    {
+        if (HotkeyParser.TryParse(spec, out var mod, out var key) && _hotkeys.Register(mod, key, action)) return;
+
+        if (spec != fallback &&
+            HotkeyParser.TryParse(fallback, out var fmod, out var fkey) && _hotkeys.Register(fmod, fkey, action))
+            failed.Add($"{label} → dùng mặc định {fallback} vì \"{spec}\" hỏng/bị chiếm");
+        else
+            failed.Add($"{label} ({spec})");
+    }
+
+    void DefineRegion()
+    {
+        using var sel = new RegionSelector();
+        sel.ShowDialog();
+        if (sel.Result is not { } r) return;
+        _savedRegion = r;
+        Log($"Đã nhớ vùng chụp {r.Width}x{r.Height} — từ giờ {_settings.CaptureRegionHotkey} chụp đúng vùng này.");
+    }
+
+    /// <summary>Phím chụp: đang trong đợt bằng chứng thì chụp CÓ GÁC CỔNG, ngoài đợt thì chụp thường.</summary>
+    void CaptureHotkey()
+    {
+        if (_evidence is { Active: true } session) { session.CaptureCurrent(); return; }
+
+        if (_savedRegion is not { } r)
+        {
+            Log($"Chụp: chưa khoanh vùng — bấm {_settings.DefineRegionHotkey} một lần.");
+            return;
+        }
+        PlainCapture(r);
+    }
+
+    void CaptureActiveWindow()
+    {
+        if (ScreenCapture.ActiveWindowBounds() is not { } b) { Log("Chụp: không có cửa sổ hợp lệ."); return; }
+        PlainCapture(b);
+    }
+
+    // Chụp thường (ngoài đợt bằng chứng) vẫn lưu PNG như QuickShot cũ.
+    void PlainCapture(Rectangle region) => Log("Chụp: " + ScreenCapture.Grab(region, _settings, saveFile: true).Message);
+
+    void ShowConfigWindow()
+    {
+        Show();
+        WindowState = FormWindowState.Normal;
+        Activate();
+    }
+
+    void StopEvidence()
+    {
+        if (_evidence is not { Active: true }) { Log("Chụp bằng chứng: không có đợt nào đang chạy."); return; }
+        _evidence.Stop();
+        Log("Chụp bằng chứng: đã dừng đợt.");
+        ShowConfigWindow();
+    }
+
+    void EvidenceDialog()
+    {
+        if (_evidence == null) return;
+
+        var input = new TextBox
+        {
+            Multiline = true, Dock = DockStyle.Fill, AcceptsTab = false,
+            ScrollBars = ScrollBars.Both, WordWrap = false, Font = new Font("Consolas", 9f),
+            Text = string.Join(Environment.NewLine, _settings.Worklist),
+        };
+
+        var hint = new Label
+        {
+            Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(2, 4, 2, 8),
+            Text = "CÁCH THƯỜNG DÙNG — \"Copy từ Excel\": không cần điền gì ở đây.\r\n" +
+                   "    Trong file test case: copy label (dòng trên) → copy phần trong 「 」.\r\n" +
+                   "    Thanh nổi hiện sẵn cặp C#; chưa có trong mapping.csv thì gõ vào rồi Enter là ghi thêm + chạy.\r\n\r\n" +
+                   "Ô dưới chỉ dùng cho \"Chạy theo danh sách\" (khi bạn đã có sẵn list):\r\n" +
+                   "    Mỗi dòng  TC-id ⇥ cmdLabel ⇥ cmdVar ⇥ kỳ vọng   (⇥ = Tab hoặc ≥2 dấu cách)\r\n" +
+                   "    Dòng trống / bắt đầu bằng # bị bỏ qua. Dòng 1 cột = cmdLabel, TC-id tự đánh số.\r\n\r\n" +
+                   $"Trong đợt:  {_settings.GotoCurrentHotkey} = đặt breakpoint & copy biểu thức Watch   ·   " +
+                   $"{_settings.CaptureRegionHotkey} = chụp (bị chặn nếu sai thao tác)\r\n" +
+                   $"{_settings.DefineRegionHotkey} = khoanh vùng chụp — làm 1 lần sau khi sắp xong cửa sổ VS",
+        };
+
+        var clipBtn = new Button { Text = "Bắt đầu — copy từ Excel", AutoSize = true, Margin = new Padding(0, 0, 6, 0) };
+        var startBtn = new Button { Text = "Chạy theo danh sách", AutoSize = true, Margin = new Padding(0, 0, 6, 0) };
+        var closeBtn = new Button { Text = "Đóng", AutoSize = true, DialogResult = DialogResult.Cancel };
+
+        using var dlg = new Form
+        {
+            Text = "Chụp bằng chứng — danh sách test case", Width = 760, Height = 560,
+            StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = true,
+            ShowInTaskbar = false, TopMost = true, Padding = new Padding(8),
+        };
+
+        void AfterStart()
+        {
+            dlg.DialogResult = DialogResult.OK;
+            dlg.Close();
+
+            if (_savedRegion == null)
+                MessageBox.Show(this,
+                    $"Sắp cửa sổ VS sao cho thấy CẢ dòng code lẫn cửa sổ Watch, rồi bấm {_settings.DefineRegionHotkey} " +
+                    "để khoanh vùng chụp. Chỉ cần làm một lần cho cả đợt.",
+                    "Còn một bước", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            Hide();   // thu về tray, trên màn hình chỉ còn thanh nổi
+        }
+
+        clipBtn.Click += (_, _) =>
+        {
+            _evidence.Start(null);   // null = nghe clipboard, không cần danh sách
+            AfterStart();
+        };
+
+        startBtn.Click += (_, _) =>
+        {
+            var items = Worklist.Parse(input.Text);
+            if (items.Count == 0)
+            {
+                MessageBox.Show(dlg, "Chưa có dòng nào hợp lệ trong ô danh sách.", "Danh sách trống",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var list = new Worklist(items);
+            // Cùng danh sách với lần trước -> giữ lại các TC đã chụp và vị trí đang làm dở.
+            if (_settings.Worklist.SequenceEqual(list.ToLines()))
+            {
+                list.RestoreDone(_settings.WorklistDone);
+                list.MoveTo(_settings.WorklistIndex);
+            }
+
+            _settings.Worklist = list.ToLines();
+            _settings.WorklistIndex = list.Index;
+            _settings.WorklistDone = list.DoneIds();
+            _settings.Save();
+
+            _evidence.Start(list);
+            AfterStart();
+        };
+
+        var btnRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, AutoSize = true, Padding = new Padding(8),
+        };
+        btnRow.Controls.Add(closeBtn);
+        btnRow.Controls.Add(startBtn);
+        btnRow.Controls.Add(clipBtn);
+
+        var inputHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2) };
+        inputHost.Controls.Add(input);
+
+        dlg.Controls.Add(inputHost);
+        dlg.Controls.Add(hint);
+        dlg.Controls.Add(btnRow);
+        dlg.CancelButton = closeBtn;
+        dlg.ShowDialog(this);
+    }
+
+    // Bấm X = thu về tray (app còn sống để hotkey vẫn chạy). Thoát hẳn chỉ qua menu tray.
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!_reallyExit && e.CloseReason == CloseReason.UserClosing)
+        {
+            e.Cancel = true;
+            Hide();
+            _tray.BalloonTipTitle = "Vẫn đang chạy";
+            _tray.BalloonTipText = "App thu về khay hệ thống, hotkey vẫn hoạt động. Thoát hẳn: chuột phải icon → Thoát.";
+            _tray.ShowBalloonTip(2000);
+            return;
+        }
+
+        base.OnFormClosing(e);
+        _evidence?.Dispose();
+        _hotkeys.Dispose();
+        _tray.Visible = false;
+        _tray.Dispose();
     }
 
     void Log(string msg) =>
