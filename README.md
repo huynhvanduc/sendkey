@@ -1,7 +1,9 @@
 # VS SendKey Automation Demo
 
-App WinForms .NET 8 điều khiển Visual Studio 2022 / 2026 đang chạy: **Go To Line**,
-**Toggle Breakpoint** theo file + line, **Add Watch** một biểu thức.
+App WinForms .NET 8 chạy nền ở khay hệ thống, điều khiển Visual Studio 2022 / 2026 đang chạy:
+**Go To Line**, **Toggle Breakpoint** theo file + line, **Add Watch** một biểu thức, và
+**chụp bằng chứng Unit Test có gác cổng** (xem [Chụp bằng chứng](#chụp-bằng-chứng-gộp-quickshot-vào-app)
+— gộp từ QuickShot: hotkey toàn cục + chụp vùng đã nhớ).
 Breakpoint và goto-line đi qua EnvDTE (chính xác theo file+line). **Add Watch** copy
 biểu thức vào clipboard và mở cửa sổ Watch của VS — bạn bấm **Ctrl+V** rồi Enter
 (không gõ tự động: `SendKeys` gõ mù có thể rơi vào editor và sửa nhầm file `.cs`).
@@ -86,6 +88,73 @@ Batch / Kiểm tra mapping.csv. (Test `BigSampleFixtureTests` đảm bảo mappi
 `samples/BigSample/cmd-input.txt` — khối `cmdLabel <Tab> cmdVar` dựng sẵn (có chú thích `#`,
 vài dòng lỗi cố ý): mở, copy, dán thẳng vào ô **Batch**.
 
+## Chụp bằng chứng (gộp QuickShot vào app)
+
+Chế độ chạy chính khi làm evidence Unit Test. App **chạy nền ở khay hệ thống**; bấm `X` chỉ thu
+về tray (hotkey vẫn sống), thoát hẳn qua chuột phải icon tray → **Thoát**.
+
+### Hotkey (sửa trong `settings.json`, cạnh `.exe`)
+
+| Phím tắt | Chức năng |
+|---|---|
+| `Ctrl+Shift+R` | Kéo chuột khoanh **vùng chụp**, nhớ lại để dùng cho cả đợt |
+| `Ctrl+Shift+G` | Tới test case đang chọn: xóa breakpoint cũ trong file → đặt đúng 1 cái → copy biểu thức Watch |
+| `Ctrl+Shift+S` | **Chụp bằng chứng** (đang trong đợt) hoặc chụp vùng đã lưu (ngoài đợt) |
+| `Ctrl+Shift+F` | Chụp toàn màn hình |
+| `Ctrl+Shift+W` | Chụp cửa sổ đang active |
+
+### Chuẩn bị 1 lần cho cả đợt
+
+1. Trỏ `mapping.csv` + `target .cs` (app nhớ từ lần trước).
+2. Bấm **Chụp bằng chứng…** → dán danh sách, mỗi dòng:
+   `TC-id ⇥ cmdLabel ⇥ cmdVar ⇥ kỳ vọng` (⇥ = Tab hoặc ≥2 dấu cách).
+   - Bỏ trống `cmdVar` = chỉ đặt breakpoint ở label, không so giá trị.
+   - Bỏ trống `kỳ vọng` = không so giá trị, chỉ kiểm dừng đúng dòng.
+   - Dòng chỉ có 1 cột = `cmdLabel`, TC-id tự đánh số. Dòng trống / `#` bị bỏ qua.
+3. **Bắt đầu đợt chụp** → cửa sổ thu về tray, còn lại **thanh mỏng** luôn nổi trên cùng (kéo được).
+4. Sắp VS thấy **cả dòng code lẫn cửa sổ Watch** → `Ctrl+Shift+R` khoanh vùng. Chỉ làm một lần.
+
+### Vòng lặp mỗi test case
+
+```
+thanh mỏng:  ▶ TC-017 · CHECK_INPUT/%RC% · Program.cs:19 · F5 → dừng → Ctrl+V vào Watch
+
+Ctrl+Shift+G   xóa BP cũ, đặt BP, goto, copy "rc" vào clipboard
+F5  +  Ctrl+V  trong VS: chạy, dán biểu thức vào cửa sổ Watch
+     ↓ chương trình dừng → app TỰ chấm (bám DebuggerEvents.OnEnterBreakMode) → ding/buzz
+thanh mỏng:  ✅ TC-017 · Program.cs:19 · rc = 0 (kỳ vọng 0) · chụp được
+Ctrl+Shift+S   chụp vùng → vào Clipboard → đánh dấu ✓ → tự sang TC-018
+Ctrl+V         dán vào tài liệu bằng chứng
+```
+
+Ảnh bằng chứng **chỉ vào Clipboard, không lưu file** (dán thẳng vào tài liệu). Các hotkey chụp
+thường (`F`/`W`/ngoài đợt) vẫn lưu PNG vào `SaveFolder` như QuickShot cũ.
+
+### Gác cổng — cái chặn ảnh sai
+
+`Ctrl+Shift+S` chấm trạng thái VS **trước khi** chụp. Đỏ thì buzz và **không tạo ảnh nào**:
+
+| Tình huống | Xử lý |
+|---|---|
+| Chưa ở break mode | 🚫 chặn |
+| Dừng nhưng không do breakpoint (Break All / exception) | 🚫 chặn |
+| Dừng sai dòng / sai file so với test case | 🚫 chặn |
+| Biểu thức không evaluate được (sai tên, chưa vào scope) | 🚫 chặn |
+| Giá trị ≠ kỳ vọng | ⚠️ hỏi lại (có ca cố tình chụp lỗi) |
+| Giá trị y hệt lần chụp trước, **cùng phiên debug** | ⚠️ hỏi lại — nghi chưa reset biến |
+| Dòng breakpoint không nhắc tới biến | ⚠️ ghi cảnh báo vào log |
+
+Đối chiếu dòng dùng `Debugger.BreakpointLastHit` (breakpoint nào thật sự làm dừng), không phải vị
+trí con trỏ — nên người dùng click lung tung trong editor cũng không đánh lừa được.
+
+Worklist + vị trí đang làm dở được lưu vào `settings.json`: đóng app mở lại, dán đúng danh sách cũ
+là chạy tiếp từ chỗ dừng.
+
+### Dán ảnh vào Excel đúng cỡ sẵn
+
+Điền `ClipboardWidthInches` / `ClipboardHeightInches` (inch, khớp đơn vị Format Picture của Excel)
+trong `settings.json` → mọi ảnh vào clipboard đều đúng cỡ đó, khỏi kéo tay từng cái. `0` = tắt.
+
 ## Kiểm thử thủ công
 
 | # | Thao tác | Kỳ vọng |
@@ -107,6 +176,19 @@ vài dòng lỗi cố ý): mở, copy, dán thẳng vào ô **Batch**.
 | 15 | Sau bước 10: **F5** debug `SampleTarget`, đợi dừng ở breakpoint, bấm **Add Watch**, Ctrl+V | Dòng `rc` xuất hiện trong cửa sổ Watch kèm giá trị `0` |
 | 16 | Bấm **Batch…**, dán 3 dòng: `CHECK_INPUT<Tab>%RC%` / `VALIDATE_DATE` / `KHONGCO<Tab>%RC%`, bấm **Chạy** | Bảng: 2 `[OK]` (Program.cs:19, :24) + 1 `[LỖI] … không thấy label`; 2 chấm đỏ trong VS; tổng kết `2 OK, 1 lỗi / 3 dòng` |
 | 17 | Bật **Chỉ tra**, lặp lại bước 16 | Cùng bảng nhưng không đặt breakpoint; tổng kết có `(Chỉ tra …)` |
+
+### Chụp bằng chứng
+
+| # | Thao tác | Kỳ vọng |
+|---|---|---|
+| 18 | Chạy app; xem khay hệ thống; bấm `X` trên cửa sổ | Có icon tray; cửa sổ biến mất nhưng app còn sống (balloon "Vẫn đang chạy"); double-click tray mở lại |
+| 19 | Bấm **Chụp bằng chứng…**, dán `TC-01⇥CHECK_INPUT⇥%RC%⇥0` và `TC-02⇥VALIDATE_DATE`, bấm **Bắt đầu đợt chụp** | Cửa sổ thu về tray; thanh mỏng hiện `▶ TC-01 · CHECK_INPUT/%RC% · Program.cs:19`; hộp thoại nhắc khoanh vùng |
+| 20 | Sắp VS thấy code + Watch, bấm `Ctrl+Shift+R`, kéo chọn vùng | Log `Đã nhớ vùng chụp …`; thanh mỏng không đổi |
+| 21 | Bấm `Ctrl+Shift+S` khi **chưa** F5 | **Buzz**, KHÔNG có ảnh vào clipboard; thanh mỏng đỏ `❌ Chưa dừng ở breakpoint…` |
+| 22 | Bấm `Ctrl+Shift+G`, rồi F5 trong VS, đợi dừng | Chỉ còn 1 chấm đỏ trong file; khi dừng app **tự** kêu ding, thanh mỏng xanh `✅ TC-01 · Program.cs:19 · rc = 0 (kỳ vọng 0) · chụp được` |
+| 23 | Bấm `Ctrl+Shift+S` | Ding; ảnh bay về góc; `Ctrl+V` vào Word/Excel ra ảnh; thanh mỏng `✓ TC-01 đã chụp … ▶ tiếp: TC-02`; đếm `1/2`. **Không** có file PNG mới trong `SaveFolder` |
+| 24 | Sửa worklist thành kỳ vọng sai (`TC-01⇥CHECK_INPUT⇥%RC%⇥9`), lặp bước 22–23 | Thanh mỏng vàng `⚠ … LỆCH`; bấm chụp → hộp thoại hỏi Yes/No, mặc định No; chọn No thì không có ảnh |
+| 25 | Đóng app, mở lại, dán đúng worklist cũ, **Bắt đầu** | Đếm giữ nguyên số đã chụp, con trỏ về đúng test case đang làm dở |
 
 ## Ghi chú
 

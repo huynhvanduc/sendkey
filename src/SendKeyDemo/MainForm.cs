@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using EnvDTE;
+using QuickShot;
 
 namespace SendKeyDemo;
 
@@ -44,6 +45,15 @@ public class MainForm : Form
     string _mapRowsPath = "";
     DateTime _mapRowsMtime;
 
+    // --- chụp bằng chứng (gộp từ QuickShot) ---
+    readonly Button _evidenceBtn = new() { Text = "Chụp bằng chứng…", AutoSize = true };
+    readonly NotifyIcon _tray = new() { Visible = true, Text = "SendKey Evidence" };
+    HotkeyWindow _hotkeys = new();
+    EvidenceSession? _evidence;
+    AppSettings _settings = new();
+    Rectangle? _savedRegion;      // vùng chụp đã khoanh, dùng lại cho mọi lần chụp
+    bool _reallyExit;             // false = bấm X thì thu về tray, không thoát
+
     public MainForm()
     {
         Text = "VS SendKey Automation Demo";
@@ -81,6 +91,7 @@ public class MainForm : Form
         mapBtns.Controls.Add(_run);
         mapBtns.Controls.Add(_recentBtn);
         mapBtns.Controls.Add(_batch);
+        mapBtns.Controls.Add(_evidenceBtn);
         mapBtns.Controls.Add(_checkMapping);
         mapGrid.Controls.Add(mapBtns, 1, 4);
 
@@ -145,24 +156,50 @@ public class MainForm : Form
         _targetCs.TextChanged += (_, _) => SaveSettings();
         _topMostBox.CheckedChanged += (_, _) => { TopMost = _topMostBox.Checked; SaveSettings(); };
         _run.Click += (_, _) => TraVaChay();
+        _evidenceBtn.Click += (_, _) => EvidenceDialog();
         _cmdLabel.KeyDown += MappingKeyDown;
         _cmdVar.KeyDown += MappingKeyDown;
+        _instances.SelectedIndexChanged += (_, _) => _evidence?.AttachWatcher();
 
         Load += (_, _) =>
         {
             _loading = true;
-            var s = AppSettings.Load();
-            _mappingPath.Text = s.MappingPath ?? "";
-            _targetCs.Text = s.TargetCsPath ?? "";
-            _topMostBox.Checked = s.TopMost;
-            TopMost = s.TopMost;
-            _recent.AddRange(s.RecentLookups);
+            _settings = AppSettings.Load();
+            _mappingPath.Text = _settings.MappingPath ?? "";
+            _targetCs.Text = _settings.TargetCsPath ?? "";
+            _topMostBox.Checked = _settings.TopMost;
+            TopMost = _settings.TopMost;
+            _recent.AddRange(_settings.RecentLookups);
             _recentBtn.Enabled = _recent.Count > 0;
             _loading = false;
 
+            _evidence = new EvidenceSession(
+                CurrentDte,
+                ResolveForEvidence,
+                EffectiveCsPath,
+                () => _savedRegion,
+                Log,
+                _settings);
+            _evidence.Strip.OpenConfigRequested += ShowConfigWindow;
+
+            BuildTray();
+            var hotkeyProblem = RegisterHotkeys();
+            if (hotkeyProblem != null) Log("Hotkey: " + hotkeyProblem);
+
             VsAutomation.OleMessageFilter.Register();
             LoadInstances();
+            _evidence.AttachWatcher();
         };
+    }
+
+    DTE? CurrentDte() => (_instances.SelectedItem as VsInstance)?.Dte;
+
+    /// <summary>Tra 1 dòng worklist ra (row, dòng breakpoint) — bọc lại ResolveRowToLine cho EvidenceSession.</summary>
+    (MapRow? Row, int Line, string? Error) ResolveForEvidence(string label, string? cmdVar)
+    {
+        var rows = GetMapRows();
+        if (rows == null) return (null, 0, "không nạp được mapping.csv");
+        return ResolveRowToLine(rows, label, cmdVar);
     }
 
     void MappingKeyDown(object? sender, KeyEventArgs e)
@@ -177,13 +214,12 @@ public class MainForm : Form
     void SaveSettings()
     {
         if (_loading) return;
-        new AppSettings
-        {
-            MappingPath = _mappingPath.Text,
-            TargetCsPath = _targetCs.Text,
-            TopMost = _topMostBox.Checked,
-            RecentLookups = _recent.ToArray()
-        }.Save();
+        // Sửa trên đối tượng đã nạp, KHÔNG tạo mới — tạo mới sẽ xóa mất phần cấu hình hotkey/chụp.
+        _settings.MappingPath = _mappingPath.Text;
+        _settings.TargetCsPath = _targetCs.Text;
+        _settings.TopMost = _topMostBox.Checked;
+        _settings.RecentLookups = _recent.ToArray();
+        _settings.Save();
     }
 
     void PushRecent(string label, string var)
@@ -775,6 +811,216 @@ public class MainForm : Form
         {
             Log($"{label} LỖI: {ex.Message}");
         }
+    }
+
+    // ==================== chụp bằng chứng: tray + hotkey + worklist ====================
+
+    static Icon LoadAppIcon()
+    {
+        using var s = typeof(MainForm).Assembly.GetManifestResourceStream("SendKeyDemo.app_runtime.ico");
+        return s != null ? new Icon(s) : SystemIcons.Application;
+    }
+
+    void BuildTray()
+    {
+        _tray.Icon = LoadAppIcon();
+        Icon = _tray.Icon;
+
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Cửa sổ cấu hình", null, (_, _) => ShowConfigWindow());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add($"Chụp bằng chứng… ({_settings.CaptureRegionHotkey})", null, (_, _) => EvidenceDialog());
+        menu.Items.Add("Dừng đợt chụp", null, (_, _) => StopEvidence());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add($"Khoanh vùng chụp ({_settings.DefineRegionHotkey})", null, (_, _) => DefineRegion());
+        menu.Items.Add($"Chụp toàn màn hình ({_settings.FullScreenHotkey})", null,
+            (_, _) => PlainCapture(ScreenCapture.CursorScreenBounds()));
+        menu.Items.Add($"Chụp cửa sổ hiện tại ({_settings.ActiveWindowHotkey})", null, (_, _) => CaptureActiveWindow());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Thoát", null, (_, _) => { _reallyExit = true; Close(); });
+
+        _tray.ContextMenuStrip = menu;
+        _tray.DoubleClick += (_, _) => ShowConfigWindow();
+    }
+
+    string? RegisterHotkeys()
+    {
+        _hotkeys.Dispose();
+        _hotkeys = new HotkeyWindow();
+        var defaults = new AppSettings();
+        var failed = new List<string>();
+
+        RegisterOne(_settings.DefineRegionHotkey, defaults.DefineRegionHotkey, "Khoanh vùng", DefineRegion, failed);
+        RegisterOne(_settings.CaptureRegionHotkey, defaults.CaptureRegionHotkey, "Chụp", CaptureHotkey, failed);
+        RegisterOne(_settings.FullScreenHotkey, defaults.FullScreenHotkey, "Chụp toàn màn hình",
+            () => PlainCapture(ScreenCapture.CursorScreenBounds()), failed);
+        RegisterOne(_settings.ActiveWindowHotkey, defaults.ActiveWindowHotkey, "Chụp cửa sổ", CaptureActiveWindow, failed);
+        RegisterOne(_settings.GotoCurrentHotkey, defaults.GotoCurrentHotkey, "Tới test case",
+            () => _evidence?.GotoCurrent(), failed);
+
+        return failed.Count > 0 ? "không đăng ký được: " + string.Join("; ", failed) : null;
+    }
+
+    void RegisterOne(string spec, string fallback, string label, Action action, List<string> failed)
+    {
+        if (HotkeyParser.TryParse(spec, out var mod, out var key) && _hotkeys.Register(mod, key, action)) return;
+
+        if (spec != fallback &&
+            HotkeyParser.TryParse(fallback, out var fmod, out var fkey) && _hotkeys.Register(fmod, fkey, action))
+            failed.Add($"{label} → dùng mặc định {fallback} vì \"{spec}\" hỏng/bị chiếm");
+        else
+            failed.Add($"{label} ({spec})");
+    }
+
+    void DefineRegion()
+    {
+        using var sel = new RegionSelector();
+        sel.ShowDialog();
+        if (sel.Result is not { } r) return;
+        _savedRegion = r;
+        Log($"Đã nhớ vùng chụp {r.Width}x{r.Height} — từ giờ {_settings.CaptureRegionHotkey} chụp đúng vùng này.");
+    }
+
+    /// <summary>Phím chụp: đang trong đợt bằng chứng thì chụp CÓ GÁC CỔNG, ngoài đợt thì chụp thường.</summary>
+    void CaptureHotkey()
+    {
+        if (_evidence is { Active: true } session) { session.CaptureCurrent(); return; }
+
+        if (_savedRegion is not { } r)
+        {
+            Log($"Chụp: chưa khoanh vùng — bấm {_settings.DefineRegionHotkey} một lần.");
+            return;
+        }
+        PlainCapture(r);
+    }
+
+    void CaptureActiveWindow()
+    {
+        if (ScreenCapture.ActiveWindowBounds() is not { } b) { Log("Chụp: không có cửa sổ hợp lệ."); return; }
+        PlainCapture(b);
+    }
+
+    // Chụp thường (ngoài đợt bằng chứng) vẫn lưu PNG như QuickShot cũ.
+    void PlainCapture(Rectangle region) => Log("Chụp: " + ScreenCapture.Grab(region, _settings, saveFile: true).Message);
+
+    void ShowConfigWindow()
+    {
+        Show();
+        WindowState = FormWindowState.Normal;
+        Activate();
+    }
+
+    void StopEvidence()
+    {
+        if (_evidence is not { Active: true }) { Log("Chụp bằng chứng: không có đợt nào đang chạy."); return; }
+        _evidence.Stop();
+        Log("Chụp bằng chứng: đã dừng đợt.");
+        ShowConfigWindow();
+    }
+
+    void EvidenceDialog()
+    {
+        if (_evidence == null) return;
+
+        var input = new TextBox
+        {
+            Multiline = true, Dock = DockStyle.Fill, AcceptsTab = false,
+            ScrollBars = ScrollBars.Both, WordWrap = false, Font = new Font("Consolas", 9f),
+            Text = string.Join(Environment.NewLine, _settings.Worklist),
+        };
+
+        var hint = new Label
+        {
+            Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(2, 4, 2, 8),
+            Text = "Mỗi dòng:  TC-id ⇥ cmdLabel ⇥ cmdVar ⇥ kỳ vọng     (⇥ = Tab hoặc ≥2 dấu cách)\r\n" +
+                   "Bỏ trống cmdVar = chỉ đặt breakpoint ở label. Bỏ trống kỳ vọng = không so giá trị.\r\n" +
+                   "Dòng trống / bắt đầu bằng # bị bỏ qua. Dòng chỉ có 1 cột = cmdLabel, TC-id tự đánh số.\r\n\r\n" +
+                   $"Trong đợt:  {_settings.GotoCurrentHotkey} = tới test case & đặt breakpoint   ·   " +
+                   $"{_settings.CaptureRegionHotkey} = chụp (bị chặn nếu sai)\r\n" +
+                   $"{_settings.DefineRegionHotkey} = khoanh vùng chụp (làm 1 lần, sau khi sắp xong cửa sổ VS)",
+        };
+
+        var startBtn = new Button { Text = "Bắt đầu đợt chụp", AutoSize = true, Margin = new Padding(0, 0, 6, 0) };
+        var closeBtn = new Button { Text = "Đóng", AutoSize = true, DialogResult = DialogResult.Cancel };
+
+        using var dlg = new Form
+        {
+            Text = "Chụp bằng chứng — danh sách test case", Width = 760, Height = 560,
+            StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = true,
+            ShowInTaskbar = false, TopMost = true, Padding = new Padding(8),
+        };
+
+        startBtn.Click += (_, _) =>
+        {
+            var items = Worklist.Parse(input.Text);
+            if (items.Count == 0)
+            {
+                MessageBox.Show(dlg, "Chưa có dòng nào hợp lệ.", "Worklist trống",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var list = new Worklist(items);
+            // Cùng danh sách với lần trước -> giữ lại các TC đã chụp và vị trí đang làm dở.
+            if (_settings.Worklist.SequenceEqual(list.ToLines()))
+            {
+                list.RestoreDone(_settings.WorklistDone);
+                list.MoveTo(_settings.WorklistIndex);
+            }
+
+            _settings.Worklist = list.ToLines();
+            _settings.WorklistIndex = list.Index;
+            _settings.WorklistDone = list.DoneIds();
+            _settings.Save();
+
+            _evidence.Start(list);
+            dlg.DialogResult = DialogResult.OK;
+            dlg.Close();
+
+            if (_savedRegion == null)
+                MessageBox.Show(this,
+                    $"Sắp cửa sổ VS sao cho thấy CẢ dòng code lẫn cửa sổ Watch, rồi bấm {_settings.DefineRegionHotkey} " +
+                    "để khoanh vùng chụp. Chỉ cần làm một lần cho cả đợt.",
+                    "Còn một bước", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            Hide();   // thu về tray, chỉ còn thanh mỏng trên màn hình
+        };
+
+        var btnRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, AutoSize = true, Padding = new Padding(8),
+        };
+        btnRow.Controls.Add(closeBtn);
+        btnRow.Controls.Add(startBtn);
+
+        var inputHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2) };
+        inputHost.Controls.Add(input);
+
+        dlg.Controls.Add(inputHost);
+        dlg.Controls.Add(hint);
+        dlg.Controls.Add(btnRow);
+        dlg.CancelButton = closeBtn;
+        dlg.ShowDialog(this);
+    }
+
+    // Bấm X = thu về tray (app còn sống để hotkey vẫn chạy). Thoát hẳn chỉ qua menu tray.
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!_reallyExit && e.CloseReason == CloseReason.UserClosing)
+        {
+            e.Cancel = true;
+            Hide();
+            _tray.BalloonTipTitle = "Vẫn đang chạy";
+            _tray.BalloonTipText = "App thu về khay hệ thống, hotkey vẫn hoạt động. Thoát hẳn: chuột phải icon → Thoát.";
+            _tray.ShowBalloonTip(2000);
+            return;
+        }
+
+        base.OnFormClosing(e);
+        _evidence?.Dispose();
+        _hotkeys.Dispose();
+        _tray.Visible = false;
+        _tray.Dispose();
     }
 
     void Log(string msg) =>
