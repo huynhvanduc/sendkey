@@ -27,8 +27,13 @@ public class MainForm : Form
     readonly Button _targetBrowse = new() { Text = "Browse...", AutoSize = true };
     readonly TextBox _cmdLabel = new() { Dock = DockStyle.Fill };
     readonly TextBox _cmdVar = new() { Dock = DockStyle.Fill };
+    readonly Button _mappingOpen = new() { Text = "Mở", AutoSize = true };
+    readonly Button _targetOpen = new() { Text = "Mở", AutoSize = true };
     readonly Button _run = new() { Text = "Tra & Chạy", AutoSize = true };
     readonly Button _batch = new() { Text = "Batch…", AutoSize = true };
+    readonly Button _recentBtn = new() { Text = "Gần đây ▾", AutoSize = true };
+    readonly ContextMenuStrip _recentMenu = new();
+    readonly List<string> _recent = new();
     readonly Button _checkMapping = new() { Text = "Kiểm tra mapping.csv", AutoSize = true };
     readonly Button _clearBpFile = new() { Text = "Xóa BP file này", AutoSize = true };
     readonly Button _copyWatch = new() { Text = "Copy Watch", AutoSize = true };
@@ -56,18 +61,25 @@ public class MainForm : Form
         mapGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
         mapGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         mapGrid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        var mappingBtnCell = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
+        mappingBtnCell.Controls.Add(_mappingBrowse);
+        mappingBtnCell.Controls.Add(_mappingOpen);
+        var targetBtnCell = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
+        targetBtnCell.Controls.Add(_targetBrowse);
+        targetBtnCell.Controls.Add(_targetOpen);
         mapGrid.Controls.Add(new Label { Text = "mapping.csv", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
         mapGrid.Controls.Add(_mappingPath, 1, 0);
-        mapGrid.Controls.Add(_mappingBrowse, 2, 0);
+        mapGrid.Controls.Add(mappingBtnCell, 2, 0);
         mapGrid.Controls.Add(new Label { Text = "target .cs", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
         mapGrid.Controls.Add(_targetCs, 1, 1);
-        mapGrid.Controls.Add(_targetBrowse, 2, 1);
+        mapGrid.Controls.Add(targetBtnCell, 2, 1);
         mapGrid.Controls.Add(new Label { Text = "cmdLabel", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
         mapGrid.Controls.Add(_cmdLabel, 1, 2);
         mapGrid.Controls.Add(new Label { Text = "cmdVar", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
         mapGrid.Controls.Add(_cmdVar, 1, 3);
         var mapBtns = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
         mapBtns.Controls.Add(_run);
+        mapBtns.Controls.Add(_recentBtn);
         mapBtns.Controls.Add(_batch);
         mapBtns.Controls.Add(_checkMapping);
         mapGrid.Controls.Add(mapBtns, 1, 4);
@@ -121,11 +133,14 @@ public class MainForm : Form
         _copyWatch.Click += (_, _) => CopyWatch();
         _checkMapping.Click += (_, _) => KiemTraMapping();
         _batch.Click += (_, _) => BatchDialog();
+        _recentBtn.Click += (_, _) => ShowRecentMenu();
         _lookupOnlyBox.CheckedChanged += (_, _) =>
             _run.Enabled = _batch.Enabled = _lookupOnlyBox.Checked || _instances.SelectedItem is VsInstance;
 
         _mappingBrowse.Click += (_, _) => PickFile(_mappingPath, "CSV (*.csv)|*.csv|Tất cả (*.*)|*.*");
         _targetBrowse.Click += (_, _) => PickFile(_targetCs, "C# (*.cs)|*.cs|Tất cả (*.*)|*.*");
+        _mappingOpen.Click += (_, _) => OpenInEditor(_mappingPath.Text);
+        _targetOpen.Click += (_, _) => OpenInEditor(_targetCs.Text);
         _mappingPath.TextChanged += (_, _) => SaveSettings();
         _targetCs.TextChanged += (_, _) => SaveSettings();
         _topMostBox.CheckedChanged += (_, _) => { TopMost = _topMostBox.Checked; SaveSettings(); };
@@ -141,6 +156,8 @@ public class MainForm : Form
             _targetCs.Text = s.TargetCsPath ?? "";
             _topMostBox.Checked = s.TopMost;
             TopMost = s.TopMost;
+            _recent.AddRange(s.RecentLookups);
+            _recentBtn.Enabled = _recent.Count > 0;
             _loading = false;
 
             VsAutomation.OleMessageFilter.Register();
@@ -164,8 +181,56 @@ public class MainForm : Form
         {
             MappingPath = _mappingPath.Text,
             TargetCsPath = _targetCs.Text,
-            TopMost = _topMostBox.Checked
+            TopMost = _topMostBox.Checked,
+            RecentLookups = _recent.ToArray()
         }.Save();
+    }
+
+    void PushRecent(string label, string var)
+    {
+        label = label.Trim();
+        if (label.Length == 0) return;
+        var key = label + "\t" + var.Trim();
+        _recent.RemoveAll(x => string.Equals(x, key, StringComparison.OrdinalIgnoreCase));
+        _recent.Insert(0, key);
+        if (_recent.Count > 20) _recent.RemoveRange(20, _recent.Count - 20);
+        _recentBtn.Enabled = true;
+        SaveSettings();
+    }
+
+    void ShowRecentMenu()
+    {
+        _recentMenu.Items.Clear();
+        foreach (var entry in _recent)
+        {
+            var parts = entry.Split('\t');
+            var lbl = parts[0];
+            var vr = parts.Length > 1 ? parts[1] : "";
+            var text = vr.Length == 0 ? lbl : $"{lbl}   |   {vr}";
+            if (text.Length > 80) text = text[..80] + "…";
+            _recentMenu.Items.Add(text, null, (_, _) =>
+            {
+                _cmdLabel.Text = lbl;
+                _cmdVar.Text = vr;
+                _cmdLabel.Focus();
+            });
+        }
+        if (_recentMenu.Items.Count > 0)
+            _recentMenu.Show(_recentBtn, new Point(0, _recentBtn.Height));
+    }
+
+    void OpenInEditor(string path)
+    {
+        path = path.Trim();
+        if (path.Length == 0 || !File.Exists(path)) { Log($"Mở file: không thấy {path}"); return; }
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Log("Mở file: lỗi — " + ex.Message);
+        }
     }
 
     void PickFile(TextBox target, string filter)
@@ -477,6 +542,7 @@ public class MainForm : Form
         _file.Text = csp;
         _line.Value = Math.Min(line, (int)_line.Maximum);
         if (!labelOnly) _watch.Text = row.CsharpVar;
+        PushRecent(_cmdLabel.Text, _cmdVar.Text);
 
         if (lookupOnly)
         {

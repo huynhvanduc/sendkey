@@ -66,6 +66,9 @@ Tiện ích thêm:
   cho mọi dòng hợp lệ (goto dòng đầu tiên), in bảng `[OK]/[LỖI]` + tổng kết. Tôn trọng
   checkbox **Chỉ tra** (khi bật: chỉ liệt kê vị trí, không đụng VS). Không popup chọn biến /
   thêm mapping giữa chừng — dòng nào hỏng thì báo lỗi và bỏ qua.
+- **Gần đây ▾** — menu 20 lần Tra & Chạy gần nhất (`cmdLabel | cmdVar`); chọn để điền lại
+  nhanh. Lưu trong `settings.json`.
+- **Mở** (cạnh Browse) — mở `mapping.csv` / file `.cs` bằng ứng dụng mặc định của Windows.
 
 ## Kiểm thử thủ công
 

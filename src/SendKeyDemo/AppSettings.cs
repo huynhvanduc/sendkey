@@ -7,6 +7,7 @@ public record AppSettings
     public string? MappingPath { get; init; }
     public string? TargetCsPath { get; init; }
     public bool TopMost { get; init; } = true;
+    public string[] RecentLookups { get; init; } = System.Array.Empty<string>();   // "cmdLabel\tcmdVar", mới nhất đầu
 
     static string DefaultPath => Path.Combine(AppContext.BaseDirectory, "settings.json");
 

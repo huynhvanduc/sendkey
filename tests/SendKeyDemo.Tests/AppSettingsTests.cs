@@ -48,4 +48,17 @@ public class AppSettingsTests
         Assert.Equal("x", s.MappingPath);
         Assert.True(s.TopMost);
     }
+
+    [Fact]
+    public void RecentLookups_round_trips_and_defaults_to_empty()
+    {
+        var p = Path.GetTempFileName();
+        new AppSettings { RecentLookups = new[] { "A\t%X%", "B\t" } }.Save(p);
+        var s = AppSettings.Load(p);
+        File.Delete(p);
+        Assert.Equal(new[] { "A\t%X%", "B\t" }, s.RecentLookups);
+
+        Assert.Empty(AppSettings.Load(
+            Path.Combine(Path.GetTempPath(), "missing-" + Guid.NewGuid() + ".json")).RecentLookups);
+    }
 }
