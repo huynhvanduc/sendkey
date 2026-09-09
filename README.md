@@ -98,7 +98,7 @@ về tray (hotkey vẫn sống), thoát hẳn qua chuột phải icon tray → *
 | Phím tắt | Chức năng |
 |---|---|
 | `Ctrl+Shift+R` | Kéo chuột khoanh **vùng chụp**, nhớ lại để dùng cho cả đợt |
-| `Ctrl+Shift+G` | Tới test case đang chọn: xóa breakpoint cũ trong file → đặt đúng 1 cái → copy biểu thức Watch |
+| `Ctrl+Shift+G` | Chạy cặp đang hiện trên thanh: xóa breakpoint cũ trong file → đặt đúng 1 cái → goto → copy biểu thức Watch. (Bấm **Enter** khi con trỏ ở ô C# trên thanh cũng vậy, kèm ghi thêm dòng vào `mapping.csv` nếu chưa có.) |
 | `Ctrl+Shift+S` | **Chụp bằng chứng** (đang trong đợt) hoặc chụp vùng đã lưu (ngoài đợt) |
 | `Ctrl+Shift+F` | Chụp toàn màn hình |
 | `Ctrl+Shift+W` | Chụp cửa sổ đang active |
@@ -106,26 +106,53 @@ về tray (hotkey vẫn sống), thoát hẳn qua chuột phải icon tray → *
 ### Chuẩn bị 1 lần cho cả đợt
 
 1. Trỏ `mapping.csv` + `target .cs` (app nhớ từ lần trước).
-2. Bấm **Chụp bằng chứng…** → dán danh sách, mỗi dòng:
-   `TC-id ⇥ cmdLabel ⇥ cmdVar ⇥ kỳ vọng` (⇥ = Tab hoặc ≥2 dấu cách).
-   - Bỏ trống `cmdVar` = chỉ đặt breakpoint ở label, không so giá trị.
-   - Bỏ trống `kỳ vọng` = không so giá trị, chỉ kiểm dừng đúng dòng.
-   - Dòng chỉ có 1 cột = `cmdLabel`, TC-id tự đánh số. Dòng trống / `#` bị bỏ qua.
-3. **Bắt đầu đợt chụp** → cửa sổ thu về tray, còn lại **thanh mỏng** luôn nổi trên cùng (kéo được).
+2. Bấm **Chụp bằng chứng…** → **Bắt đầu — copy từ Excel**. Không cần điền gì.
+3. Cửa sổ thu về tray, còn lại **thanh nổi** trên cùng (kéo được):
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│ cmd  [CHECK_INPUT          ] 「[%RC%                    ]」    │
+│ C#   [CHECK_INPUT          ]   [rc                      ] ⏎Chạy│
+│ ● Đã có trong mapping — bấm Ctrl+Shift+G để đặt breakpoint   3 ảnh │
+└────────────────────────────────────────────────────────────────┘
+```
+
 4. Sắp VS thấy **cả dòng code lẫn cửa sổ Watch** → `Ctrl+Shift+R` khoanh vùng. Chỉ làm một lần.
 
 ### Vòng lặp mỗi test case
 
-```
-thanh mỏng:  ▶ TC-017 · CHECK_INPUT/%RC% · Program.cs:19 · F5 → dừng → Ctrl+V vào Watch
+App nghe clipboard, nên bạn **không phải rời file Excel để dán vào tool**. Quy tắc phân
+biệt duy nhất: **trong 「 」 là biến / mệnh đề, ngoài ngoặc là label.**
 
-Ctrl+Shift+G   xóa BP cũ, đặt BP, goto, copy "rc" vào clipboard
-F5  +  Ctrl+V  trong VS: chạy, dán biểu thức vào cửa sổ Watch
-     ↓ chương trình dừng → app TỰ chấm (bám DebuggerEvents.OnEnterBreakMode) → ding/buzz
-thanh mỏng:  ✅ TC-017 · Program.cs:19 · rc = 0 (kỳ vọng 0) · chụp được
-Ctrl+Shift+S   chụp vùng → vào Clipboard → đánh dấu ✓ → tự sang TC-018
-Ctrl+V         dán vào tài liệu bằng chứng
 ```
+Trong file test case (Excel):
+  Ctrl+C  label (dòng trên)   → hàng "cmd" điền label; hàng "C#" hiện csharpLabel nếu mapping đã có
+  Ctrl+C  「%RC%」             → hàng "cmd" điền biến; hàng "C#" hiện csharpVar nếu đã có
+
+  ├─ Đã có trong mapping.csv → Ctrl+Shift+G
+  └─ Chưa có                 → gõ csharpLabel / csharpVar vào ô trống (tô vàng) rồi Enter
+                               → app validate với file .cs, ghi thêm dòng vào mapping.csv, rồi chạy
+
+  → xóa BP cũ trong file, đặt đúng 1 BP, goto, copy biểu thức Watch vào clipboard
+
+Trong VS:
+  F5  +  Ctrl+V              chạy, dán biểu thức vào cửa sổ Watch
+     ↓ chương trình dừng → app TỰ chấm (bám DebuggerEvents.OnEnterBreakMode) → ding / buzz
+thanh nổi:  ✅ Program.cs:19 · rc = 0 · chụp được
+  Ctrl+Shift+S               chụp vùng → vào Clipboard
+  Ctrl+V                     dán vào tài liệu bằng chứng
+```
+
+App tự bỏ qua thứ chính nó đẩy vào clipboard (biểu thức Watch, ảnh chụp) nên không tự kích
+hoạt mình. Copy nhầm thứ không liên quan (đoạn văn dài, không ngoặc) thì bị bỏ qua im lặng.
+Xử lý sẵn full-width (`％`→`%`, khoảng trắng U+3000), `『 』`, và ô Excel có xuống dòng.
+
+### Chế độ danh sách (tùy chọn)
+
+Nếu bạn đã có sẵn list, dán vào ô trong hộp thoại rồi bấm **Chạy theo danh sách**: mỗi dòng
+`TC-id ⇥ cmdLabel ⇥ cmdVar ⇥ kỳ vọng` (⇥ = Tab hoặc ≥2 dấu cách; dòng trống / `#` bị bỏ qua;
+dòng 1 cột = cmdLabel, TC-id tự đánh số). Chụp xong tự sang dòng sau, đếm tiến độ, và
+lưu chỗ đang làm dở vào `settings.json` để mở lại chạy tiếp.
 
 Ảnh bằng chứng **chỉ vào Clipboard, không lưu file** (dán thẳng vào tài liệu). Các hotkey chụp
 thường (`F`/`W`/ngoài đợt) vẫn lưu PNG vào `SaveFolder` như QuickShot cũ.
@@ -182,13 +209,21 @@ trong `settings.json` → mọi ảnh vào clipboard đều đúng cỡ đó, kh
 | # | Thao tác | Kỳ vọng |
 |---|---|---|
 | 18 | Chạy app; xem khay hệ thống; bấm `X` trên cửa sổ | Có icon tray; cửa sổ biến mất nhưng app còn sống (balloon "Vẫn đang chạy"); double-click tray mở lại |
-| 19 | Bấm **Chụp bằng chứng…**, dán `TC-01⇥CHECK_INPUT⇥%RC%⇥0` và `TC-02⇥VALIDATE_DATE`, bấm **Bắt đầu đợt chụp** | Cửa sổ thu về tray; thanh mỏng hiện `▶ TC-01 · CHECK_INPUT/%RC% · Program.cs:19`; hộp thoại nhắc khoanh vùng |
-| 20 | Sắp VS thấy code + Watch, bấm `Ctrl+Shift+R`, kéo chọn vùng | Log `Đã nhớ vùng chụp …`; thanh mỏng không đổi |
-| 21 | Bấm `Ctrl+Shift+S` khi **chưa** F5 | **Buzz**, KHÔNG có ảnh vào clipboard; thanh mỏng đỏ `❌ Chưa dừng ở breakpoint…` |
-| 22 | Bấm `Ctrl+Shift+G`, rồi F5 trong VS, đợi dừng | Chỉ còn 1 chấm đỏ trong file; khi dừng app **tự** kêu ding, thanh mỏng xanh `✅ TC-01 · Program.cs:19 · rc = 0 (kỳ vọng 0) · chụp được` |
-| 23 | Bấm `Ctrl+Shift+S` | Ding; ảnh bay về góc; `Ctrl+V` vào Word/Excel ra ảnh; thanh mỏng `✓ TC-01 đã chụp … ▶ tiếp: TC-02`; đếm `1/2`. **Không** có file PNG mới trong `SaveFolder` |
-| 24 | Sửa worklist thành kỳ vọng sai (`TC-01⇥CHECK_INPUT⇥%RC%⇥9`), lặp bước 22–23 | Thanh mỏng vàng `⚠ … LỆCH`; bấm chụp → hộp thoại hỏi Yes/No, mặc định No; chọn No thì không có ảnh |
-| 25 | Đóng app, mở lại, dán đúng worklist cũ, **Bắt đầu** | Đếm giữ nguyên số đã chụp, con trỏ về đúng test case đang làm dở |
+| 19 | **Chụp bằng chứng… → Bắt đầu — copy từ Excel** | Cửa sổ thu về tray; thanh nổi hiện 4 ô trống + `● Copy label … để bắt đầu`; hộp thoại nhắc khoanh vùng |
+| 20 | Sắp VS thấy code + Watch, `Ctrl+Shift+R`, kéo chọn vùng | Log `Đã nhớ vùng chụp …` |
+| 21 | Trong Notepad/Excel gõ `CHECK_INPUT`, bôi đen, `Ctrl+C` | Ô `cmd`-trái hiện `CHECK_INPUT`; ô `C#`-trái tự điền `CHECK_INPUT`; trạng thái `Label đã có trong mapping. Copy tiếp phần trong 「 」.` |
+| 22 | Gõ `「%RC%」`, bôi đen, `Ctrl+C` | Ô `cmd`-phải hiện `%RC%` (không có ngoặc); ô `C#`-phải tự điền `rc`; trạng thái `Đã có trong mapping — bấm Ctrl+Shift+G…` |
+| 23 | Gõ `「％ＲＣ％」` (full-width), `Ctrl+C` | Vẫn ra `%RC%` — chuẩn hóa full-width hoạt động |
+| 24 | Copy một đoạn văn dài không có 「 」 | Thanh nổi **không đổi gì** — bị bỏ qua im lặng |
+| 25 | Bấm `Ctrl+Shift+S` khi **chưa** `Ctrl+Shift+G` | Buzz, không có ảnh; `❌ Chưa đặt breakpoint — bấm Ctrl+Shift+G trước.` |
+| 26 | Bấm `Ctrl+Shift+G` | Chỉ còn **1** chấm đỏ trong file; VS nhảy tới dòng; clipboard chứa `rc`; `▶ Program.cs:19 · F5 → dừng → Ctrl+V vào Watch` |
+| 27 | Bấm `Ctrl+Shift+S` khi **chưa** F5 | Buzz, KHÔNG có ảnh; `❌ Chưa dừng ở breakpoint…` |
+| 28 | F5 trong VS, đợi dừng ở breakpoint | App **tự** kêu ding (không bấm gì); thanh nổi xanh `✅ … Program.cs:19 · rc = 0 · chụp được` |
+| 29 | Bấm `Ctrl+Shift+S` | Ding; ảnh bay về góc; `Ctrl+V` vào Word/Excel ra ảnh. **Không** có PNG mới trong `SaveFolder`; đếm `1 ảnh` |
+| 30 | Copy `KHONGCO` rồi `「%RC%」` | Hai ô `C#` **trống + tô vàng**; `Chưa có trong mapping — gõ csharpLabel + csharpVar rồi Enter` |
+| 31 | Gõ `NOSUCH` / `rc` vào 2 ô C#, Enter | Đỏ `Không thấy "NOSUCH:" trong Program.cs.`; `mapping.csv` **không đổi** |
+| 32 | Sửa ô trái thành `END_PROC`, Enter | Log `ĐÃ THÊM mapping: KHONGCO / %RC% → END_PROC / rc`; `mapping.csv` có thêm dòng; VS goto + đặt breakpoint |
+| 33 | Mở `mapping.csv` bằng Excel rồi lặp bước 32 với cặp khác | Đỏ `Không ghi được mapping.csv (đang mở trong Excel?)…`; đóng Excel, Enter lại thì ghi được |
 
 ## Ghi chú
 
