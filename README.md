@@ -70,6 +70,14 @@ Tiện ích thêm:
   nhanh. Lưu trong `settings.json`.
 - **Mở** (cạnh Browse) — mở `mapping.csv` / file `.cs` bằng ứng dụng mặc định của Windows.
 
+### Fixture để thử: `samples/BigSample`
+
+Project console lớn hơn `SampleTarget`: ~14 label + goto trong `Program.cs`, thêm 3 label
+trong `Steps.cs`, chạy `Thread.Sleep(120s)` ở cuối để kịp thao tác. Kèm `samples/BigSample/mapping.csv`
+(17 dòng, **trộn 4 cột và 5 cột** — các dòng `Steps.cs` dùng cột `csharpFile`).
+Mở `samples/BigSample/BigSample.csproj` trong VS, trỏ app vào 2 file đó để thử mapping mode /
+Batch / Kiểm tra mapping.csv. (Test `BigSampleFixtureTests` đảm bảo mapping.csv luôn khớp code.)
+
 ## Kiểm thử thủ công
 
 | # | Thao tác | Kỳ vọng |
