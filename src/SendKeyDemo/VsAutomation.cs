@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
-using System.Text;
 using System.Text.RegularExpressions;
 using EnvDTE;
 
@@ -127,28 +126,34 @@ public static class VsAutomation
         return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
     }
 
+    // Watch window kind GUID (EnvDTE.Constants.vsWindowKindWatch)
+    const string WatchWindowKind = "{90243340-BD7A-11D0-93EF-00A0C90F2734}";
+
+    /// <summary>
+    /// Copy biểu thức vào clipboard và mở/kích hoạt cửa sổ Watch. KHÔNG gõ phím tự động:
+    /// SendKeys gõ mù có thể rơi vào editor và sửa file .cs. Người dùng bấm Ctrl+V rồi Enter.
+    /// </summary>
     public static string AddWatch(DTE dte, string expression)
     {
         if (string.IsNullOrWhiteSpace(expression)) return "biểu thức trống";
         if (dte.Debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
             return "Chưa ở break mode — F5 chạy chương trình và để nó DỪNG lại ở breakpoint, rồi mới Add Watch.";
-        SetForegroundWindow(new IntPtr(dte.MainWindow.HWnd));
-        System.Threading.Thread.Sleep(150);
-        dte.ExecuteCommand("Debug.AddWatch");
-        System.Threading.Thread.Sleep(150);
-        SendKeys.SendWait(EscapeSendKeys(expression) + "{ENTER}");
-        return $"đã gửi \"{expression}\" vào Watch";
-    }
 
-    static string EscapeSendKeys(string s)
-    {
-        var sb = new StringBuilder();
-        foreach (var c in s)
-            sb.Append("+^%~(){}[]".Contains(c) ? "{" + c + "}" : c.ToString());
-        return sb.ToString();
-    }
+        var copied = false;
+        try { Clipboard.SetText(expression); copied = true; } catch { /* clipboard đang bận */ }
 
-    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+        try
+        {
+            var win = dte.Windows.Item(WatchWindowKind);
+            win.Visible = true;
+            win.Activate();
+        }
+        catch (COMException) { /* chưa mở cửa sổ Watch nào — bỏ qua */ }
+
+        return copied
+            ? $"đã copy \"{expression}\" + mở cửa sổ Watch — bấm Ctrl+V rồi Enter (không gõ tự động để tránh sửa nhầm file .cs)."
+            : $"không copy được clipboard — tự gõ \"{expression}\" vào cửa sổ Watch.";
+    }
 
     // ---- COM message filter: tự retry khi VS đang bận ----
     public static class OleMessageFilter

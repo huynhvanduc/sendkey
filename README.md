@@ -2,8 +2,9 @@
 
 App WinForms .NET 8 điều khiển Visual Studio 2022 / 2026 đang chạy: **Go To Line**,
 **Toggle Breakpoint** theo file + line, **Add Watch** một biểu thức.
-Breakpoint và goto-line đi qua EnvDTE (chính xác theo file+line); Add Watch dùng
-EnvDTE mở dòng watch rồi SendKeys gõ biểu thức.
+Breakpoint và goto-line đi qua EnvDTE (chính xác theo file+line). **Add Watch** copy
+biểu thức vào clipboard và mở cửa sổ Watch của VS — bạn bấm **Ctrl+V** rồi Enter
+(không gõ tự động: `SendKeys` gõ mù có thể rơi vào editor và sửa nhầm file `.cs`).
 
 ## Chạy
 
@@ -22,7 +23,8 @@ Yêu cầu: Windows, .NET 8 SDK, có Visual Studio 2022/2026 đang mở sẵn m�
 5. Bấm **Go To Line** / **Toggle Breakpoint** / **Add Watch**. Kết quả in ở ô log.
 
 > **Add Watch chỉ chạy khi VS đang ở break mode** (đã F5 và DỪNG tại breakpoint).
-> Ngoài break mode, lệnh `Debug.AddWatch` của VS không tồn tại — app sẽ báo nhắc.
+> Ngoài break mode app sẽ báo nhắc. Khi ở break mode: app copy biểu thức + đưa
+> cửa sổ Watch lên, bạn bấm **Ctrl+V** + Enter vào ô biểu thức trống của Watch.
 > **Toggle Breakpoint** phải trỏ vào dòng có lệnh thực thi (không phải dòng trống /
 > comment / `using` / `{`), và file phải thuộc solution đang mở trong VS.
 
@@ -62,8 +64,8 @@ Tiện ích thêm:
   không cần chọn instance VS, không goto/breakpoint. Dùng để soạn trước hoặc đối chiếu mapping.
 - **Xóa BP file này** — xóa mọi breakpoint trong file đang ở ô `File` (dọn giữa các test case;
   `Tra & Chạy` chỉ thêm breakpoint, không tự xóa).
-- **Copy Watch** — copy biểu thức ở ô `Watch` vào clipboard để tự `Ctrl+V` vào cửa sổ Watch
-  (dùng khi `Add Watch` qua SendKeys bị chặn: VS chạy admin, mất foreground…).
+- **Copy Watch** — chỉ copy biểu thức ở ô `Watch` vào clipboard (không cần VS, không kiểm
+  break mode). `Add Watch` = Copy Watch + kiểm break mode + đưa cửa sổ Watch lên.
 - **Batch…** — mở form dán nhiều dòng, mỗi dòng `cmdLabel <Tab> cmdVar` (hoặc ≥2 dấu cách;
   trống `cmdVar` = chỉ đặt breakpoint ở label). Dòng trống hoặc bắt đầu bằng `#` bị bỏ qua.
   Bấm **Chạy** → tra từng dòng, đặt breakpoint cho mọi dòng hợp lệ (goto dòng đầu tiên),
@@ -92,9 +94,9 @@ vài dòng lỗi cố ý): mở, copy, dán thẳng vào ô **Batch**.
 | 2 | File = `...\SampleTarget\Program.cs`, Line = `5`, bấm **Go To Line** | Con trỏ VS nhảy tới dòng 5 (`int counter = i * i;`); log `đã tới Program.cs:5` |
 | 3 | Bấm **Toggle Breakpoint** (Line vẫn `5`) | Chấm đỏ hiện ở dòng 5; log `đã đặt breakpoint tại Program.cs:5` |
 | 4 | Bấm **Toggle Breakpoint** lần nữa | Chấm đỏ biến mất; log `đã xóa breakpoint tại Program.cs:5` |
-| 5 | Đặt lại breakpoint ở dòng 5, **F5** debug `SampleTarget`, đợi chương trình **dừng** ở dòng 5; Watch = `counter`, bấm **Add Watch** | Dòng `counter` xuất hiện trong cửa sổ Watch kèm giá trị |
-| 6 | Watch = `label`, bấm **Add Watch** khi vẫn đang dừng | Dòng `label` xuất hiện trong Watch kèm giá trị chuỗi |
-| 7 | Bấm **Add Watch** khi KHÔNG ở break mode | Log `Chưa ở break mode — F5 chạy chương trình...`; không có lỗi thô |
+| 5 | Đặt lại breakpoint ở dòng 5, **F5** debug `SampleTarget`, đợi chương trình **dừng** ở dòng 5; Watch = `counter`, bấm **Add Watch**, rồi **Ctrl+V** + Enter vào ô Watch | Log `đã copy "counter" + mở cửa sổ Watch…`; cửa sổ Watch nổi lên; sau Ctrl+V dòng `counter` xuất hiện kèm giá trị. **File `.cs` KHÔNG bị sửa** |
+| 6 | Watch = `label`, bấm **Add Watch** khi vẫn đang dừng, Ctrl+V | Dòng `label` xuất hiện trong Watch kèm giá trị chuỗi |
+| 7 | Bấm **Add Watch** khi KHÔNG ở break mode | Log `Chưa ở break mode — F5 chạy chương trình...`; không clipboard, không thao tác VS |
 | 8 | Đóng VS, bấm một nút bất kỳ | Log `... instance đã đóng — bấm Refresh`; app không crash |
 | 9 | Mapping mode: trỏ `mapping.csv` + `samples\SampleTarget\Program.cs`; đóng/mở lại app | 2 đường dẫn còn nguyên; form nổi trên cùng |
 | 10 | Paste `CHECK_INPUT` + `%RC%`, bấm **Tra & Chạy** (hoặc Ctrl+Enter) | `File`/`Line`/`Watch` tự điền (`Watch=rc`); VS nhảy tới dòng `rc = inputExists ? 0 : 1;`; chấm đỏ hiện; log `mapping: CHECK_INPUT/%RC% → Program.cs:<n>, watch "rc" …` |
@@ -102,7 +104,7 @@ vài dòng lỗi cố ý): mở, copy, dán thẳng vào ô **Batch**.
 | 12 | cmdLabel = `CHECK_INPUT`, cmdVar = `%SAI%`, **Tra & Chạy** | Hiện danh sách `%INPUT_FILE%`, `%RC%`, `if "%RC%" NEQ "0"` để chọn |
 | 13 | cmdLabel = `KHONGCO`, cmdVar = `%RC%`, **Tra & Chạy** → ở form "Thêm mapping mới" gõ `csharpLabel = NOSUCH`, `csharpVar = rc` → OK | Form báo đỏ `không thấy "NOSUCH:"`; `mapping.csv` không đổi |
 | 14 | Sửa `csharpLabel = END_PROC` (giữ `csharpVar = rc`) → OK | `mapping.csv` có thêm dòng `KHONGCO,%RC%,END_PROC,rc`; log `ĐÃ THÊM mapping…`; VS goto + breakpoint ở `END_PROC`; `Watch = rc` |
-| 15 | Sau bước 10: **F5** debug `SampleTarget`, đợi dừng ở breakpoint, bấm **Add Watch** | Dòng `rc` xuất hiện trong cửa sổ Watch kèm giá trị `0` |
+| 15 | Sau bước 10: **F5** debug `SampleTarget`, đợi dừng ở breakpoint, bấm **Add Watch**, Ctrl+V | Dòng `rc` xuất hiện trong cửa sổ Watch kèm giá trị `0` |
 | 16 | Bấm **Batch…**, dán 3 dòng: `CHECK_INPUT<Tab>%RC%` / `VALIDATE_DATE` / `KHONGCO<Tab>%RC%`, bấm **Chạy** | Bảng: 2 `[OK]` (Program.cs:19, :24) + 1 `[LỖI] … không thấy label`; 2 chấm đỏ trong VS; tổng kết `2 OK, 1 lỗi / 3 dòng` |
 | 17 | Bật **Chỉ tra**, lặp lại bước 16 | Cùng bảng nhưng không đặt breakpoint; tổng kết có `(Chỉ tra …)` |
 
@@ -110,5 +112,4 @@ vài dòng lỗi cố ý): mở, copy, dán thẳng vào ô **Batch**.
 
 - App build x64 để khớp tiến trình 64-bit của VS.
 - Nếu VS đang bận (đang build/gỡ lỗi), lời gọi tự động retry tối đa ~10 giây.
-- Add Watch cần cửa sổ VS lên foreground trong ~0,3s; đừng thao tác chuột/bàn phím lúc đó.
-- Nếu Visual Studio chạy với quyền Administrator mà app demo thì không, Windows (UIPI) sẽ chặn `SetForegroundWindow` và `SendKeys` — Add Watch sẽ "im lặng không tác dụng". Chạy cả hai cùng mức quyền.
+- Add Watch không tự gõ nữa (tránh sửa nhầm file `.cs`) — nó copy + mở cửa sổ Watch, bạn Ctrl+V.
