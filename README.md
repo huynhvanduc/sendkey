@@ -10,7 +10,7 @@ App WinForms .NET 8 chạy nền ở khay hệ thống, dùng để **chụp b�
 dotnet run --project src/SendKeyDemo
 ```
 
-Yêu cầu: Windows, .NET 8 SDK, Visual Studio 2022/2026 đang mở solution cần debug.
+Yêu cầu: Windows, .NET SDK 8 trở lên, Visual Studio 2022/2026 đang mở solution cần debug.
 
 Bản 1 file cho team (không cần cài .NET), ra `publish\SendKeyDemo.exe`:
 

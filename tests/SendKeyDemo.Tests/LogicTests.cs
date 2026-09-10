@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using SendKeyDemo;
 using Xunit;
@@ -432,5 +433,332 @@ public class MappingTests
         Assert.Single(rows);
         Assert.Equal("sub/Foo.cs", rows[0].CsharpFile);
         Assert.Equal("x", rows[0].CsharpVar);
+    }
+}
+
+// ==================== CopiedTextTests ====================
+
+public class CopiedTextTests
+{
+    // ---------- chuẩn hóa ----------
+
+    [Theory]
+    [InlineData("％ＲＣ％", "%RC%")]                       // ASCII full-width -> nửa chiều rộng
+    [InlineData("ＣＨＥＣＫ＿ＩＮＰＵＴ", "CHECK_INPUT")]
+    [InlineData("A　B", "A B")]                             // khoảng trắng Nhật U+3000
+    [InlineData("a\r\nb", "a b")]
+    [InlineData("a\tb", "a b")]
+    [InlineData("  a   b  ", "a b")]
+    [InlineData("：", ":")]
+    public void Normalize_cases(string raw, string expected)
+        => Assert.Equal(expected, CopiedText.Normalize(raw));
+
+    [Fact]
+    public void Normalize_keeps_japanese_brackets()
+        => Assert.Equal("「%RC%」", CopiedText.Normalize("「％ＲＣ％」"));
+
+    [Theory]
+    [InlineData("\"a\nb\"", "a\nb")]
+    [InlineData("\"say \"\"hi\"\"\"", "say \"hi\"")]
+    [InlineData("khong co nhay", "khong co nhay")]
+    public void UnquoteExcel_cases(string raw, string expected)
+        => Assert.Equal(expected, CopiedText.UnquoteExcel(raw));
+
+    // ---------- bóc ngoặc ----------
+
+    [Theory]
+    [InlineData("「%RC%」", "%RC%")]
+    [InlineData("『rc != 0』", "rc != 0")]
+    [InlineData("処理結果「%RC%」が0であること", "%RC%")]
+    [InlineData("「 %RC% 」", "%RC%")]
+    public void ExtractBracket_cases(string raw, string expected)
+        => Assert.Equal(expected, CopiedText.ExtractBracket(raw));
+
+    [Fact]
+    public void ExtractBracket_takes_the_first_pair_only()
+        => Assert.Equal("%RC%", CopiedText.ExtractBracket("「%RC%」が「0」であること"));
+
+    [Fact]
+    public void ExtractBracket_null_when_no_bracket()
+        => Assert.Null(CopiedText.ExtractBracket("CHECK_INPUT"));
+
+    // ---------- phân loại ----------
+
+    [Fact]
+    public void Bracketed_text_is_a_variable()
+    {
+        var p = CopiedText.Classify("「%RC%」");
+        Assert.NotNull(p);
+        Assert.True(p!.IsVar);
+        Assert.Equal("%RC%", p.Value);
+    }
+
+    [Fact]
+    public void Fullwidth_variable_is_normalized()
+    {
+        var p = CopiedText.Classify("「％ＲＣ％」");
+        Assert.True(p!.IsVar);
+        Assert.Equal("%RC%", p.Value);
+    }
+
+    [Fact]
+    public void Bracketed_clause_keeps_inner_spaces_and_quotes()
+    {
+        var p = CopiedText.Classify("条件『if \"%RC%\" NEQ \"0\"』を満たすこと");
+        Assert.True(p!.IsVar);
+        Assert.Equal("if \"%RC%\" NEQ \"0\"", p.Value);
+    }
+
+    [Fact]
+    public void Variable_wins_even_with_japanese_text_around_it()
+    {
+        var p = CopiedText.Classify("処理結果　「%RC%」　が 0 であること");
+        Assert.True(p!.IsVar);
+        Assert.Equal("%RC%", p.Value);
+    }
+
+    [Fact]
+    public void Unbracketed_text_is_a_label()
+    {
+        var p = CopiedText.Classify("CHECK_INPUT");
+        Assert.NotNull(p);
+        Assert.False(p!.IsVar);
+        Assert.Equal("CHECK_INPUT", p.Value);
+    }
+
+    [Theory]
+    [InlineData(":CHECK_INPUT")]
+    [InlineData("：CHECK_INPUT")]
+    [InlineData("CHECK_INPUT:")]
+    [InlineData("  CHECK_INPUT  ")]
+    public void Label_strips_colons_and_spaces(string raw)
+        => Assert.Equal("CHECK_INPUT", CopiedText.Classify(raw)!.Value);
+
+    [Fact]
+    public void Excel_cell_with_newline_becomes_one_line_label()
+    {
+        var p = CopiedText.Classify("\"CHECK_INPUT\nCHECK_INPUT\"");
+        Assert.False(p!.IsVar);
+        Assert.Equal("CHECK_INPUT CHECK_INPUT", p.Value);
+    }
+
+    [Fact]
+    public void Long_unbracketed_prose_is_ignored()
+    {
+        var prose = new string('あ', CopiedText.MaxLabelLength + 1);
+        Assert.Null(CopiedText.Classify(prose));
+    }
+
+    [Fact]
+    public void Empty_or_whitespace_is_ignored()
+    {
+        Assert.Null(CopiedText.Classify(""));
+        Assert.Null(CopiedText.Classify("   \r\n  "));
+        Assert.Null(CopiedText.Classify(null));
+    }
+
+    [Fact]
+    public void Empty_brackets_are_ignored()
+    {
+        Assert.Null(CopiedText.Classify("「」"));
+        Assert.Null(CopiedText.Classify("「　」"));
+    }
+}
+
+// ==================== CaptureCheckTests ====================
+
+public class CaptureCheckTests
+{
+    const string File1 = @"C:\proj\Program.cs";
+    const string File2 = @"C:\proj\Steps.cs";
+    const int Line = 19;
+    const string Tc = "TC-017";
+
+    static DebugSnapshot Snap(
+        bool inBreak = true,
+        string hitFile = File1,
+        int hitLine = Line,
+        int bpInFile = 1,
+        bool exprValid = true,
+        string exprValue = "0",
+        int pid = 1234)
+        => new(true, inBreak, hitFile, hitLine, bpInFile, exprValid, exprValue, pid);
+
+    static CheckResult Run(DebugSnapshot s, LastCapture? prev = null, string expr = "rc")
+        => CaptureCheck.Evaluate(s, Tc, File1, Line, expr, prev);
+
+    // ---------- so giá trị ----------
+
+    [Theory]
+    [InlineData("0", "0", true)]
+    [InlineData(" 0 ", "0", true)]
+    [InlineData("\"abc\"", "abc", true)]
+    [InlineData("'x'", "x", true)]
+    [InlineData("True", "true", true)]
+    [InlineData("0", "1", false)]
+    [InlineData("\"abc\"", "abd", false)]
+    public void ValuesMatch_cases(string actual, string expected, bool match)
+        => Assert.Equal(match, CaptureCheck.ValuesMatch(actual, expected));
+
+    // ---------- chặn cứng (lỗi thao tác cơ học) ----------
+
+    [Fact]
+    public void Blocks_when_vs_state_unreadable()
+    {
+        var r = Run(DebugSnapshot.Unavailable("VS đã đóng"));
+        Assert.Equal(CheckLevel.Block, r.Level);
+        Assert.Contains("VS đã đóng", r.Message);
+    }
+
+    [Fact]
+    public void Blocks_when_not_in_break_mode()
+    {
+        var r = Run(Snap(inBreak: false));
+        Assert.Equal(CheckLevel.Block, r.Level);
+        Assert.Contains("Chưa dừng ở breakpoint", r.Message);
+    }
+
+    [Fact]
+    public void Blocks_when_stopped_but_not_by_a_breakpoint()
+    {
+        var r = Run(Snap(hitFile: "", hitLine: 0));
+        Assert.Equal(CheckLevel.Block, r.Level);
+        Assert.Contains("không phải do breakpoint", r.Message);
+    }
+
+    [Fact]
+    public void Blocks_when_stopped_at_wrong_line()
+    {
+        var r = Run(Snap(hitLine: 24));
+        Assert.Equal(CheckLevel.Block, r.Level);
+        Assert.Contains("Program.cs:24", r.Message);
+        Assert.Contains("TC-017", r.Message);
+    }
+
+    [Fact]
+    public void Blocks_when_stopped_in_wrong_file()
+    {
+        var r = Run(Snap(hitFile: File2));
+        Assert.Equal(CheckLevel.Block, r.Level);
+        Assert.Contains("Steps.cs", r.Message);
+    }
+
+    [Fact]
+    public void Blocks_when_expression_cannot_be_evaluated()
+    {
+        var r = Run(Snap(exprValid: false, exprValue: ""));
+        Assert.Equal(CheckLevel.Block, r.Level);
+        Assert.Contains("Không đọc được giá trị", r.Message);
+    }
+
+    // ---------- hỏi lại (nghi chưa reset biến) ----------
+
+    [Fact]
+    public void Confirms_when_value_identical_to_previous_capture_in_same_session()
+    {
+        var prev = new LastCapture(1234, "TC-016", "rc", "0");
+        var r = Run(Snap(exprValue: "0", pid: 1234), prev);
+        Assert.Equal(CheckLevel.Confirm, r.Level);
+        Assert.Contains("y hệt lần chụp TC-016", r.Message);
+    }
+
+    [Fact]
+    public void Same_value_after_restart_is_not_suspicious()
+    {
+        // pid khác = đã Shift+F5 rồi F5 lại -> giá trị trùng là bình thường
+        var prev = new LastCapture(1111, "TC-016", "rc", "0");
+        var r = Run(Snap(exprValue: "0", pid: 2222), prev);
+        Assert.Equal(CheckLevel.Ok, r.Level);
+    }
+
+    [Fact]
+    public void Recapturing_the_same_test_case_is_not_suspicious()
+    {
+        var prev = new LastCapture(1234, "TC-017", "rc", "0");
+        var r = Run(Snap(exprValue: "0", pid: 1234), prev);
+        Assert.Equal(CheckLevel.Ok, r.Level);
+    }
+
+    // ---------- cho qua ----------
+
+    [Fact]
+    public void Ok_when_everything_matches()
+    {
+        var r = Run(Snap());
+        Assert.Equal(CheckLevel.Ok, r.Level);
+        Assert.Contains("TC-017", r.Message);
+        Assert.Contains("rc = 0", r.Message);
+        Assert.Contains("chụp được", r.Message);
+    }
+
+    [Fact]
+    public void Ok_with_no_watch_expression_at_all()
+    {
+        var r = Run(Snap(exprValid: false, exprValue: ""), expr: "");
+        Assert.Equal(CheckLevel.Ok, r.Level);
+    }
+
+    [Fact]
+    public void Ok_but_mentions_leftover_breakpoints_in_the_file()
+    {
+        var r = Run(Snap(bpInFile: 3));
+        Assert.Equal(CheckLevel.Ok, r.Level);
+        Assert.Contains("còn 3 breakpoint", r.Message);
+    }
+
+    [Fact]
+    public void Path_comparison_ignores_separators_and_case()
+    {
+        var r = CaptureCheck.Evaluate(
+            Snap(hitFile: @"C:\proj\PROGRAM.CS"), Tc,
+            @"C:\proj\.\Program.cs", Line, "rc", null);
+        Assert.Equal(CheckLevel.Ok, r.Level);
+    }
+}
+
+// ==================== AppSettingsTests ====================
+
+public class AppSettingsTests
+{
+    [Fact]
+    public void Save_then_Load_round_trips()
+    {
+        var p = Path.GetTempFileName();
+        new AppSettings { MappingPath = @"C:\m.csv", TargetCsPath = @"C:\a.cs", TopMost = false }.Save(p);
+        var s = AppSettings.Load(p);
+        File.Delete(p);
+        Assert.Equal(@"C:\m.csv", s.MappingPath);
+        Assert.Equal(@"C:\a.cs", s.TargetCsPath);
+        Assert.False(s.TopMost);
+    }
+
+    [Fact]
+    public void Load_missing_file_returns_defaults_with_topmost_true()
+    {
+        var s = AppSettings.Load(Path.Combine(Path.GetTempPath(), "missing-" + Guid.NewGuid() + ".json"));
+        Assert.Null(s.MappingPath);
+        Assert.True(s.TopMost);
+    }
+
+    [Fact]
+    public void Load_corrupt_json_returns_defaults()
+    {
+        var p = Path.GetTempFileName();
+        File.WriteAllText(p, "{ not json");
+        var s = AppSettings.Load(p);
+        File.Delete(p);
+        Assert.True(s.TopMost);
+        Assert.Null(s.MappingPath);
+    }
+
+    [Fact]
+    public void Load_json_without_topmost_key_defaults_to_true()
+    {
+        var p = Path.GetTempFileName();
+        File.WriteAllText(p, "{\"MappingPath\":\"x\"}");
+        var s = AppSettings.Load(p);
+        File.Delete(p);
+        Assert.Equal("x", s.MappingPath);
+        Assert.True(s.TopMost);
     }
 }

@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using EnvDTE;
-using QuickShot;
 
 namespace SendKeyDemo;
 
@@ -444,11 +443,8 @@ public class MainForm : Form
 
     // ==================== chụp bằng chứng: tray + hotkey ====================
 
-    static Icon LoadAppIcon()
-    {
-        using var s = typeof(MainForm).Assembly.GetManifestResourceStream("SendKeyDemo.app_runtime.ico");
-        return s != null ? new Icon(s) : SystemIcons.Application;
-    }
+    // Dùng luôn icon đã nhúng trong exe (ApplicationIcon = app.ico) — khỏi giữ thêm file icon thứ hai.
+    static Icon LoadAppIcon() => Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
 
     void ToggleAdvanced()
     {

@@ -8,7 +8,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>x64</PlatformTarget>
     <NoWarn>NU1701</NoWarn>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- Cần cho chụp màn hình đúng toạ độ trên màn hình có scale khác nhau -->
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
@@ -16,13 +15,6 @@
 
   <ItemGroup>
     <PackageReference Include="envdte" Version="17.13.40008" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Nhúng icon để đọc lại lúc runtime cho Form/NotifyIcon, không phụ thuộc file rời. -->
-    <EmbeddedResource Include="app_runtime.ico">
-      <LogicalName>SendKeyDemo.app_runtime.ico</LogicalName>
-    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

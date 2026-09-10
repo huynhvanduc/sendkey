@@ -8,14 +8,14 @@ using Xunit.Abstractions;
 
 namespace SendKeyDemo.Tests;
 
-// Chạy đúng luồng "copy từ Excel" trên CHÍNH file samples/BigSample/tc-input-jp.txt:
-// mỗi khối lấy dòng dưới "ラベル" làm label, dòng dưới "確認値" làm biến, cho qua
-// CopiedText.Classify rồi tra mapping.csv — giống hệt cái app làm khi nghe clipboard.
-// Bỏ phần đặt breakpoint / GoToLine (cần DTE sống).
-public class JpInputFixtureTests
+// Test trên bộ mẫu samples/BigSample, chạy đúng logic app dùng (bỏ phần cần VS đang chạy):
+// - mapping.csv (4 & 5 cột trộn) tra được mọi label trong Program.cs / Steps.cs — như nút "Kiểm tra".
+// - tc-input-jp.txt: mỗi khối lấy dòng dưới "ラベル" làm label, dòng dưới "確認値" làm biến, cho qua
+//   CopiedText.Classify rồi tra mapping.csv — giống hệt lúc app nghe clipboard.
+public class BigSampleTests
 {
     readonly ITestOutputHelper _out;
-    public JpInputFixtureTests(ITestOutputHelper o) => _out = o;
+    public BigSampleTests(ITestOutputHelper o) => _out = o;
 
     static string Dir
     {
@@ -27,6 +27,33 @@ public class JpInputFixtureTests
             return Path.Combine(d!, "samples", "BigSample");
         }
     }
+
+    // ---------- mapping.csv khớp code ----------
+
+    [Fact]
+    public void Mapping_csv_loads_with_mixed_column_counts()
+    {
+        var rows = Mapping.Load(Path.Combine(Dir, "mapping.csv"));
+        Assert.Equal(17, rows.Count);
+        Assert.Equal("", rows.First(r => r.CmdLabel == "INIT").CsharpFile);
+        Assert.Equal("Steps.cs", rows.First(r => r.CmdLabel == "RECALC").CsharpFile);
+    }
+
+    [Fact]
+    public void Every_row_resolves_to_an_executable_line()
+    {
+        var rows = Mapping.Load(Path.Combine(Dir, "mapping.csv"));
+        var problems = Mapping.Validate(rows, r =>
+        {
+            var p = r.CsharpFile.Length == 0
+                ? Path.Combine(Dir, "Program.cs")
+                : Path.Combine(Dir, r.CsharpFile);
+            return File.Exists(p) ? File.ReadAllLines(p) : null;
+        });
+        Assert.Empty(problems);
+    }
+
+    // ---------- tc-input-jp.txt: luồng copy từ Excel ----------
 
     record Block(string Tc, string LabelLine, string VarLine);
 
