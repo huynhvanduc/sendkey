@@ -18,6 +18,11 @@ Yêu cầu: Windows, .NET 8 SDK, có Visual Studio 2022/2026 đang mở sẵn m�
 
 ## Cách dùng
 
+Cửa sổ chính chỉ để lộ 3 ô chuẩn bị (Visual Studio / `mapping.csv` / `target .cs`) và nút
+**▶ Bắt đầu chụp bằng chứng**. Mọi công cụ tay bên dưới (File / Line / Watch, cmdLabel / cmdVar,
+Tra & Chạy, Batch…, Chỉ tra, Chạy theo danh sách…) nằm trong **▸ Công cụ khác** — bấm để mở ra.
+App chỉ chạy 1 bản: mở exe lần nữa thì cửa sổ bản đang chạy nổi lên.
+
 1. Mở `samples/SampleTarget` bằng Visual Studio.
 2. Chạy app demo. Chọn instance VS ở dropdown trên cùng (bấm **Refresh** nếu mở VS sau).
 3. **File**: đường dẫn đầy đủ tới `samples/SampleTarget/Program.cs` (nút Browse).
@@ -106,7 +111,7 @@ về tray (hotkey vẫn sống), thoát hẳn qua chuột phải icon tray → *
 ### Chuẩn bị 1 lần cho cả đợt
 
 1. Trỏ `mapping.csv` + `target .cs` (app nhớ từ lần trước).
-2. Bấm **Chụp bằng chứng…** → **Bắt đầu — copy từ Excel**. Không cần điền gì.
+2. Bấm nút to **▶ Bắt đầu chụp bằng chứng** giữa cửa sổ. Không cần điền gì thêm.
 3. Cửa sổ thu về tray, còn lại **thanh nổi** trên cùng (kéo được):
 
 ```
@@ -149,7 +154,7 @@ Xử lý sẵn full-width (`％`→`%`, khoảng trắng U+3000), `『 』`, và
 
 ### Chế độ danh sách (tùy chọn)
 
-Nếu bạn đã có sẵn list, dán vào ô trong hộp thoại rồi bấm **Chạy theo danh sách**: mỗi dòng
+Nếu bạn đã có sẵn list: **▸ Công cụ khác → Chạy theo danh sách…**, dán vào ô rồi bấm **Chạy theo danh sách**: mỗi dòng
 `TC-id ⇥ cmdLabel ⇥ cmdVar ⇥ kỳ vọng` (⇥ = Tab hoặc ≥2 dấu cách; dòng trống / `#` bị bỏ qua;
 dòng 1 cột = cmdLabel, TC-id tự đánh số). Chụp xong tự sang dòng sau, đếm tiến độ, và
 lưu chỗ đang làm dở vào `settings.json` để mở lại chạy tiếp.
@@ -209,7 +214,7 @@ trong `settings.json` → mọi ảnh vào clipboard đều đúng cỡ đó, kh
 | # | Thao tác | Kỳ vọng |
 |---|---|---|
 | 18 | Chạy app; xem khay hệ thống; bấm `X` trên cửa sổ | Có icon tray; cửa sổ biến mất nhưng app còn sống (balloon "Vẫn đang chạy"); double-click tray mở lại |
-| 19 | **Chụp bằng chứng… → Bắt đầu — copy từ Excel** | Cửa sổ thu về tray; thanh nổi hiện 4 ô trống + `● Copy label … để bắt đầu`; hộp thoại nhắc khoanh vùng |
+| 19 | Bấm **▶ Bắt đầu chụp bằng chứng** | Cửa sổ thu về tray; thanh nổi hiện 4 ô trống + `● Copy label … để bắt đầu`; hộp thoại nhắc khoanh vùng. (Để trống `mapping.csv` hoặc `target .cs` rồi bấm → báo thiếu đường dẫn, không vào đợt) |
 | 20 | Sắp VS thấy code + Watch, `Ctrl+Shift+R`, kéo chọn vùng | Log `Đã nhớ vùng chụp …` |
 | 21 | Trong Notepad/Excel gõ `CHECK_INPUT`, bôi đen, `Ctrl+C` | Ô `cmd`-trái hiện `CHECK_INPUT`; ô `C#`-trái tự điền `CHECK_INPUT`; trạng thái `Label đã có trong mapping. Copy tiếp phần trong 「 」.` |
 | 22 | Gõ `「%RC%」`, bôi đen, `Ctrl+C` | Ô `cmd`-phải hiện `%RC%` (không có ngoặc); ô `C#`-phải tự điền `rc`; trạng thái `Đã có trong mapping — bấm Ctrl+Shift+G…` |
@@ -224,6 +229,8 @@ trong `settings.json` → mọi ảnh vào clipboard đều đúng cỡ đó, kh
 | 31 | Gõ `NOSUCH` / `rc` vào 2 ô C#, Enter | Đỏ `Không thấy "NOSUCH:" trong Program.cs.`; `mapping.csv` **không đổi** |
 | 32 | Sửa ô trái thành `END_PROC`, Enter | Log `ĐÃ THÊM mapping: KHONGCO / %RC% → END_PROC / rc`; `mapping.csv` có thêm dòng; VS goto + đặt breakpoint |
 | 33 | Mở `mapping.csv` bằng Excel rồi lặp bước 32 với cặp khác | Đỏ `Không ghi được mapping.csv (đang mở trong Excel?)…`; đóng Excel, Enter lại thì ghi được |
+| 34 | App đang mở cửa sổ, chạy `SendKeyDemo.exe` lần nữa | Cửa sổ bản đang chạy nổi lên, **không** có bản thứ 2 trong Task Manager; hotkey vẫn chạy |
+| 35 | Bấm `X` cho app về tray, chạy exe lần nữa | Hộp thoại `Đã chạy rồi` chỉ chỗ icon tray; bấm OK là thoát, bản trong tray không bị ảnh hưởng |
 
 ## Ghi chú
 

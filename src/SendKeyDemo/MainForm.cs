@@ -30,7 +30,7 @@ public class MainForm : Form, IEvidenceHost
     readonly TextBox _cmdVar = new() { Dock = DockStyle.Fill };
     readonly Button _mappingOpen = new() { Text = "Mở", AutoSize = true };
     readonly Button _targetOpen = new() { Text = "Mở", AutoSize = true };
-    readonly Button _run = new() { Text = "Tra & Chạy", AutoSize = true };
+    readonly Button _run = new() { Text = "Tra && Chạy", AutoSize = true };   // && = chữ "&", không phải phím tắt
     readonly Button _batch = new() { Text = "Batch…", AutoSize = true };
     readonly Button _recentBtn = new() { Text = "Gần đây ▾", AutoSize = true };
     readonly ContextMenuStrip _recentMenu = new();
@@ -46,7 +46,11 @@ public class MainForm : Form, IEvidenceHost
     DateTime _mapRowsMtime;
 
     // --- chụp bằng chứng (gộp từ QuickShot) ---
-    readonly Button _evidenceBtn = new() { Text = "Chụp bằng chứng…", AutoSize = true };
+    readonly Button _startEvidence = new() { Text = "▶  Bắt đầu chụp bằng chứng" };
+    readonly Button _worklistBtn = new() { Text = "Chạy theo danh sách…", AutoSize = true };
+    readonly Button _advancedToggle = new() { Text = "▸  Công cụ khác" };
+    Panel _advanced = new();
+    Label _hotkeyHint = new();
     readonly NotifyIcon _tray = new() { Visible = true, Text = "SendKey Evidence" };
     HotkeyWindow _hotkeys = new();
     EvidenceSession? _evidence;
@@ -54,82 +58,132 @@ public class MainForm : Form, IEvidenceHost
     Rectangle? _savedRegion;      // vùng chụp đã khoanh, dùng lại cho mọi lần chụp
     bool _reallyExit;             // false = bấm X thì thu về tray, không thoát
 
+    /// <summary>Ô chứa nút bên phải hàng — GrowAndShrink để cột AutoSize đo đúng, không đẩy tràn khung.</summary>
+    static FlowLayoutPanel ButtonCell(params Control[] buttons)
+    {
+        var cell = new FlowLayoutPanel
+        {
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0), WrapContents = false,
+        };
+        cell.Controls.AddRange(buttons);
+        return cell;
+    }
+
+    // Nhãn AutoSize trong cột AutoSize: tự đo theo font + DPI. Cột px cứng bị co ×0.8 khi cửa sổ
+    // chuyển từ màn 125% sang màn 100% và cắt chữ thành "Visual Stu…".
+    static Label RowLabel(string text) => new()
+    {
+        Text = text, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 0, 6, 0),
+    };
+
     public MainForm()
     {
-        Text = "VS SendKey Automation Demo";
-        Width = 780;
-        Height = 620;
+        Text = "SendKey Evidence";
+        AutoScaleMode = AutoScaleMode.Dpi;
+        // Kích thước cửa sổ đặt ở Load (xem lý do ở đó). Ở đây tránh số px cứng — dùng AutoSize.
 
-        var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8, 8, 8, 0) };
-        top.Controls.Add(_instances);
-        top.Controls.Add(_refresh);
+        // ---------- 1. Khối chuẩn bị: 3 thứ duy nhất cần trước khi chụp ----------
+        _instances.Dock = DockStyle.Fill;
 
-        var mapGrid = new TableLayoutPanel
+        var setup = new TableLayoutPanel
         {
-            Dock = DockStyle.Top, ColumnCount = 3, RowCount = 5, AutoSize = true, Padding = new Padding(8, 4, 8, 4)
+            Dock = DockStyle.Top, ColumnCount = 3, RowCount = 3, AutoSize = true,
+            Padding = new Padding(12, 12, 12, 4),
         };
-        mapGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
-        mapGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        mapGrid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        var mappingBtnCell = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
-        mappingBtnCell.Controls.Add(_mappingBrowse);
-        mappingBtnCell.Controls.Add(_mappingOpen);
-        var targetBtnCell = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
-        targetBtnCell.Controls.Add(_targetBrowse);
-        targetBtnCell.Controls.Add(_targetOpen);
-        mapGrid.Controls.Add(new Label { Text = "mapping.csv", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
-        mapGrid.Controls.Add(_mappingPath, 1, 0);
-        mapGrid.Controls.Add(mappingBtnCell, 2, 0);
-        mapGrid.Controls.Add(new Label { Text = "target .cs", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
-        mapGrid.Controls.Add(_targetCs, 1, 1);
-        mapGrid.Controls.Add(targetBtnCell, 2, 1);
-        mapGrid.Controls.Add(new Label { Text = "cmdLabel", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
-        mapGrid.Controls.Add(_cmdLabel, 1, 2);
-        mapGrid.Controls.Add(new Label { Text = "cmdVar", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
-        mapGrid.Controls.Add(_cmdVar, 1, 3);
-        var mapBtns = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
-        mapBtns.Controls.Add(_run);
-        mapBtns.Controls.Add(_recentBtn);
-        mapBtns.Controls.Add(_batch);
-        mapBtns.Controls.Add(_evidenceBtn);
-        mapBtns.Controls.Add(_checkMapping);
-        mapGrid.Controls.Add(mapBtns, 1, 4);
+        setup.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        setup.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        setup.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        var grid = new TableLayoutPanel
+        var refreshCell = ButtonCell(_refresh);
+        var mappingBtnCell = ButtonCell(_mappingBrowse, _mappingOpen);
+        var targetBtnCell = ButtonCell(_targetBrowse, _targetOpen);
+
+        setup.Controls.Add(RowLabel("Visual Studio"), 0, 0);
+        setup.Controls.Add(_instances, 1, 0);
+        setup.Controls.Add(refreshCell, 2, 0);
+        setup.Controls.Add(RowLabel("mapping.csv"), 0, 1);
+        setup.Controls.Add(_mappingPath, 1, 1);
+        setup.Controls.Add(mappingBtnCell, 2, 1);
+        setup.Controls.Add(RowLabel("target .cs"), 0, 2);
+        setup.Controls.Add(_targetCs, 1, 2);
+        setup.Controls.Add(targetBtnCell, 2, 2);
+
+        // ---------- 2. Hành động chính: một nút ----------
+        _startEvidence.Font = new Font(Font.FontFamily, 10.5f, FontStyle.Bold);
+        _startEvidence.Dock = DockStyle.Top;
+        _startEvidence.AutoSize = true;
+        _startEvidence.Padding = new Padding(0, 9, 0, 9);
+
+        var hotkeyHint = new Label
         {
-            Dock = DockStyle.Top, ColumnCount = 3, AutoSize = true, Padding = new Padding(8)
+            Dock = DockStyle.Top, AutoSize = true, ForeColor = SystemColors.GrayText,
+            Padding = new Padding(2, 6, 2, 0),
         };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 56));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        grid.Controls.Add(new Label { Text = "File", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
-        grid.Controls.Add(_file, 1, 0);
-        grid.Controls.Add(_browse, 2, 0);
-        grid.Controls.Add(new Label { Text = "Line", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
-        grid.Controls.Add(_line, 1, 1);
-        grid.Controls.Add(new Label { Text = "Watch", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
-        grid.Controls.Add(_watch, 1, 2);
+        _hotkeyHint = hotkeyHint;
 
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8, 0, 8, 8) };
-        buttons.Controls.Add(_goto);
-        buttons.Controls.Add(_bp);
-        buttons.Controls.Add(_clearBpFile);
-        buttons.Controls.Add(_addWatch);
-        buttons.Controls.Add(_copyWatch);
+        var primary = new Panel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(12, 4, 12, 8) };
+        primary.Controls.Add(hotkeyHint);
+        primary.Controls.Add(_startEvidence);
 
-        var bottomPanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(8, 0, 8, 4) };
+        // ---------- 3. Công cụ khác: thu gọn, mặc định ẩn ----------
+        _advancedToggle.Dock = DockStyle.Top;
+        _advancedToggle.FlatStyle = FlatStyle.Flat;
+        _advancedToggle.FlatAppearance.BorderSize = 0;
+        _advancedToggle.TextAlign = ContentAlignment.MiddleLeft;
+        _advancedToggle.AutoSize = true;
+        _advancedToggle.TabStop = false;
+        _advancedToggle.ForeColor = SystemColors.GrayText;
+        _advancedToggle.Click += (_, _) => ToggleAdvanced();
+
+        var adv = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top, ColumnCount = 3, AutoSize = true, Padding = new Padding(12, 0, 12, 8),
+        };
+        adv.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        adv.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        adv.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        var mapBtns = ButtonCell(_run, _recentBtn, _batch, _worklistBtn, _checkMapping);
+        var vsBtns = ButtonCell(_goto, _bp, _clearBpFile, _addWatch, _copyWatch);
+
+        adv.Controls.Add(RowLabel("cmdLabel"), 0, 0);
+        adv.Controls.Add(_cmdLabel, 1, 0);
+        adv.Controls.Add(RowLabel("cmdVar"), 0, 1);
+        adv.Controls.Add(_cmdVar, 1, 1);
+        adv.Controls.Add(mapBtns, 1, 2);
+        adv.SetColumnSpan(mapBtns, 2);   // hàng nút dài: cho lấn sang cột Browse, không bị cắt
+        adv.Controls.Add(RowLabel("File"), 0, 3);
+        adv.Controls.Add(_file, 1, 3);
+        adv.Controls.Add(_browse, 2, 3);
+        adv.Controls.Add(RowLabel("Line"), 0, 4);
+        // Bọc trong ô AutoSize: khối này layout lúc còn ẩn (cột rộng 0) nên ô Line rộng cố định bị ép còn 1 vạch.
+        adv.Controls.Add(ButtonCell(_line), 1, 4);
+        adv.Controls.Add(RowLabel("Watch"), 0, 5);
+        adv.Controls.Add(_watch, 1, 5);
+        adv.Controls.Add(vsBtns, 1, 6);
+        adv.SetColumnSpan(vsBtns, 2);
+        adv.Controls.Add(_lookupOnlyBox, 1, 7);
+
+        _advanced = new Panel { Dock = DockStyle.Top, AutoSize = true, Visible = false };
+        _advanced.Controls.Add(adv);
+
+        // ---------- 4. Log + chân cửa sổ ----------
+        var bottomPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(12, 0, 12, 6),
+        };
         bottomPanel.Controls.Add(_topMostBox);
-        bottomPanel.Controls.Add(_lookupOnlyBox);
 
-        var logHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8) };
+        var logHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 0, 12, 4) };
         logHost.Controls.Add(_log);
 
         Controls.Add(logHost);
         Controls.Add(bottomPanel);
-        Controls.Add(buttons);
-        Controls.Add(grid);
-        Controls.Add(mapGrid);
-        Controls.Add(top);
+        Controls.Add(_advanced);
+        Controls.Add(_advancedToggle);
+        Controls.Add(primary);
+        Controls.Add(setup);
 
         _refresh.Click += (_, _) => LoadInstances();
         _browse.Click += (_, _) =>
@@ -156,13 +210,20 @@ public class MainForm : Form, IEvidenceHost
         _targetCs.TextChanged += (_, _) => SaveSettings();
         _topMostBox.CheckedChanged += (_, _) => { TopMost = _topMostBox.Checked; SaveSettings(); };
         _run.Click += (_, _) => TraVaChay();
-        _evidenceBtn.Click += (_, _) => EvidenceDialog();
+        _startEvidence.Click += (_, _) => StartClipboardMode();
+        _worklistBtn.Click += (_, _) => EvidenceDialog();
         _cmdLabel.KeyDown += MappingKeyDown;
         _cmdVar.KeyDown += MappingKeyDown;
         _instances.SelectedIndexChanged += (_, _) => _evidence?.AttachWatcher();
 
         Load += (_, _) =>
         {
+            // Form được tạo ở DPI hệ thống (màn chính 125%) rồi mới hiện lên màn đang dùng; sang màn
+            // 100% thì WinForms nhân mọi thứ ×0.8. Nên không đặt px cứng — quy từ đơn vị 96-dpi.
+            MinimumSize = LogicalToDeviceUnits(new Size(680, 470));
+            Size = LogicalToDeviceUnits(new Size(780, 580));
+            CenterToScreen();
+
             _loading = true;
             _settings = AppSettings.Load();
             _mappingPath.Text = _settings.MappingPath ?? "";
@@ -179,6 +240,7 @@ public class MainForm : Form, IEvidenceHost
             BuildTray();
             var hotkeyProblem = RegisterHotkeys();
             if (hotkeyProblem != null) Log("Hotkey: " + hotkeyProblem);
+            RefreshHotkeyHint();
 
             VsAutomation.OleMessageFilter.Register();
             LoadInstances();
@@ -879,6 +941,52 @@ public class MainForm : Form, IEvidenceHost
         return s != null ? new Icon(s) : SystemIcons.Application;
     }
 
+    void ToggleAdvanced()
+    {
+        _advanced.Visible = !_advanced.Visible;
+        _advancedToggle.Text = _advanced.Visible ? "▾  Công cụ khác" : "▸  Công cụ khác";
+        // Nút Flat đang giữ focus sẽ vẽ viền đen cả hàng — chuyển focus đi (mở ra thì vào ô cmdLabel).
+        ActiveControl = _advanced.Visible ? _cmdLabel : null;
+    }
+
+    void RefreshHotkeyHint()
+        => _hotkeyHint.Text =
+            $"Trong đợt:   {_settings.DefineRegionHotkey} khoanh vùng (1 lần)   ·   " +
+            $"{_settings.GotoCurrentHotkey} đặt breakpoint   ·   {_settings.CaptureRegionHotkey} chụp";
+
+    /// <summary>Nút chính — vào thẳng chế độ copy từ Excel, không qua hộp thoại nào.</summary>
+    void StartClipboardMode()
+    {
+        if (_evidence == null) return;
+
+        if (_mappingPath.Text.Trim() is var m && (m.Length == 0 || !File.Exists(m)))
+        {
+            MessageBox.Show(this, "Chưa trỏ mapping.csv ở trên.", "Thiếu đường dẫn",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (_targetCs.Text.Trim() is var t && (t.Length == 0 || !File.Exists(t)))
+        {
+            MessageBox.Show(this, "Chưa trỏ file .cs đích ở trên.", "Thiếu đường dẫn",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        _evidence.Start(null);
+        AfterEvidenceStart();
+    }
+
+    void AfterEvidenceStart()
+    {
+        if (_savedRegion == null)
+            MessageBox.Show(this,
+                $"Sắp cửa sổ VS sao cho thấy CẢ dòng code lẫn cửa sổ Watch, rồi bấm {_settings.DefineRegionHotkey} " +
+                "để khoanh vùng chụp. Chỉ cần làm một lần cho cả đợt.",
+                "Còn một bước", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+        Hide();   // thu về tray, trên màn hình chỉ còn thanh nổi
+    }
+
     void BuildTray()
     {
         _tray.Icon = LoadAppIcon();
@@ -887,7 +995,7 @@ public class MainForm : Form, IEvidenceHost
         var menu = new ContextMenuStrip();
         menu.Items.Add("Cửa sổ cấu hình", null, (_, _) => ShowConfigWindow());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add($"Chụp bằng chứng… ({_settings.CaptureRegionHotkey})", null, (_, _) => EvidenceDialog());
+        menu.Items.Add("Bắt đầu chụp bằng chứng", null, (_, _) => StartClipboardMode());
         menu.Items.Add("Dừng đợt chụp", null, (_, _) => StopEvidence());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add($"Khoanh vùng chụp ({_settings.DefineRegionHotkey})", null, (_, _) => DefineRegion());
@@ -990,18 +1098,12 @@ public class MainForm : Form, IEvidenceHost
         var hint = new Label
         {
             Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(2, 4, 2, 8),
-            Text = "CÁCH THƯỜNG DÙNG — \"Copy từ Excel\": không cần điền gì ở đây.\r\n" +
-                   "    Trong file test case: copy label (dòng trên) → copy phần trong 「 」.\r\n" +
-                   "    Thanh nổi hiện sẵn cặp C#; chưa có trong mapping.csv thì gõ vào rồi Enter là ghi thêm + chạy.\r\n\r\n" +
-                   "Ô dưới chỉ dùng cho \"Chạy theo danh sách\" (khi bạn đã có sẵn list):\r\n" +
-                   "    Mỗi dòng  TC-id ⇥ cmdLabel ⇥ cmdVar ⇥ kỳ vọng   (⇥ = Tab hoặc ≥2 dấu cách)\r\n" +
-                   "    Dòng trống / bắt đầu bằng # bị bỏ qua. Dòng 1 cột = cmdLabel, TC-id tự đánh số.\r\n\r\n" +
-                   $"Trong đợt:  {_settings.GotoCurrentHotkey} = đặt breakpoint & copy biểu thức Watch   ·   " +
-                   $"{_settings.CaptureRegionHotkey} = chụp (bị chặn nếu sai thao tác)\r\n" +
-                   $"{_settings.DefineRegionHotkey} = khoanh vùng chụp — làm 1 lần sau khi sắp xong cửa sổ VS",
+            Text = "Dùng khi bạn ĐÃ CÓ SẴN danh sách test case. Bình thường thì không cần —\r\n" +
+                   "nút \"Bắt đầu chụp bằng chứng\" ở cửa sổ chính đọc thẳng từ clipboard.\r\n\r\n" +
+                   "Mỗi dòng:  TC-id ⇥ cmdLabel ⇥ cmdVar ⇥ kỳ vọng   (⇥ = Tab hoặc ≥2 dấu cách)\r\n" +
+                   "Dòng trống / bắt đầu bằng # bị bỏ qua. Dòng 1 cột = cmdLabel, TC-id tự đánh số.",
         };
 
-        var clipBtn = new Button { Text = "Bắt đầu — copy từ Excel", AutoSize = true, Margin = new Padding(0, 0, 6, 0) };
         var startBtn = new Button { Text = "Chạy theo danh sách", AutoSize = true, Margin = new Padding(0, 0, 6, 0) };
         var closeBtn = new Button { Text = "Đóng", AutoSize = true, DialogResult = DialogResult.Cancel };
 
@@ -1010,26 +1112,6 @@ public class MainForm : Form, IEvidenceHost
             Text = "Chụp bằng chứng — danh sách test case", Width = 760, Height = 560,
             StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = true,
             ShowInTaskbar = false, TopMost = true, Padding = new Padding(8),
-        };
-
-        void AfterStart()
-        {
-            dlg.DialogResult = DialogResult.OK;
-            dlg.Close();
-
-            if (_savedRegion == null)
-                MessageBox.Show(this,
-                    $"Sắp cửa sổ VS sao cho thấy CẢ dòng code lẫn cửa sổ Watch, rồi bấm {_settings.DefineRegionHotkey} " +
-                    "để khoanh vùng chụp. Chỉ cần làm một lần cho cả đợt.",
-                    "Còn một bước", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-            Hide();   // thu về tray, trên màn hình chỉ còn thanh nổi
-        }
-
-        clipBtn.Click += (_, _) =>
-        {
-            _evidence.Start(null);   // null = nghe clipboard, không cần danh sách
-            AfterStart();
         };
 
         startBtn.Click += (_, _) =>
@@ -1056,7 +1138,9 @@ public class MainForm : Form, IEvidenceHost
             _settings.Save();
 
             _evidence.Start(list);
-            AfterStart();
+            dlg.DialogResult = DialogResult.OK;
+            dlg.Close();
+            AfterEvidenceStart();
         };
 
         var btnRow = new FlowLayoutPanel
@@ -1065,7 +1149,6 @@ public class MainForm : Form, IEvidenceHost
         };
         btnRow.Controls.Add(closeBtn);
         btnRow.Controls.Add(startBtn);
-        btnRow.Controls.Add(clipBtn);
 
         var inputHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(2) };
         inputHost.Controls.Add(input);
