@@ -14,7 +14,6 @@ public sealed class AppSettings
     public string? MappingPath { get; set; }
     public string? TargetCsPath { get; set; }
     public bool TopMost { get; set; } = true;
-    public string[] RecentLookups { get; set; } = Array.Empty<string>();   // "cmdLabel\tcmdVar", mới nhất đầu
 
     // ---- nửa chụp màn hình ----
     public string DefineRegionHotkey { get; set; } = "Ctrl+Shift+R";
@@ -29,13 +28,8 @@ public sealed class AppSettings
     public double ClipboardHeightInches { get; set; } = 0;
 
     // ---- chế độ chụp bằng chứng ----
-    /// <summary>Hotkey nhảy tới + đặt breakpoint cho test case đang chọn trong worklist.</summary>
+    /// <summary>Hotkey đặt breakpoint cho cặp đang hiện trên thanh chụp.</summary>
     public string GotoCurrentHotkey { get; set; } = "Ctrl+Shift+G";
-
-    /// <summary>Worklist đang làm dở (mỗi dòng "tcId\tcmdLabel\tcmdVar\texpected") + vị trí, để mở lại app là chạy tiếp.</summary>
-    public string[] Worklist { get; set; } = Array.Empty<string>();
-    public int WorklistIndex { get; set; }
-    public string[] WorklistDone { get; set; } = Array.Empty<string>();   // các tcId đã chụp
 
     /// <summary>Vị trí thanh trạng thái mỏng người dùng đã kéo tới; null = canh giữa mép trên.</summary>
     public int? StripX { get; set; }

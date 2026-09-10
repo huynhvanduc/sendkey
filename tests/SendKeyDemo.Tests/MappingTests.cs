@@ -433,16 +433,4 @@ public class MappingTests
         Assert.Equal("sub/Foo.cs", rows[0].CsharpFile);
         Assert.Equal("x", rows[0].CsharpVar);
     }
-
-    [Theory]
-    [InlineData("CHECK_INPUT\t%RC%", "CHECK_INPUT", "%RC%")]
-    [InlineData("CHECK_INPUT   %RC%", "CHECK_INPUT", "%RC%")]
-    [InlineData("  VALIDATE_DATE  ", "VALIDATE_DATE", "")]
-    [InlineData("L\tif \"%RC%\" NEQ \"0\"", "L", "if \"%RC%\" NEQ \"0\"")]
-    public void SplitBatchLine_cases(string raw, string label, string var)
-    {
-        var (l, v) = Mapping.SplitBatchLine(raw);
-        Assert.Equal(label, l);
-        Assert.Equal(var, v);
-    }
 }

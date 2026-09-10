@@ -5,7 +5,7 @@ public enum CheckLevel
 {
     /// <summary>Mọi thứ khớp — chụp thẳng.</summary>
     Ok,
-    /// <summary>Sai lệch về giá trị (có thể cố ý) — hỏi lại rồi mới chụp.</summary>
+    /// <summary>Nghi chưa reset biến — hỏi lại rồi mới chụp.</summary>
     Confirm,
     /// <summary>Sai thao tác cơ học — không chụp.</summary>
     Block,
@@ -38,7 +38,7 @@ public record CheckResult(CheckLevel Level, string Message);
 /// </summary>
 public static class CaptureCheck
 {
-    /// <summary>So giá trị debugger đọc được với giá trị kỳ vọng, bỏ qua nháy bao ngoài và hoa/thường.</summary>
+    /// <summary>So hai giá trị debugger đọc được, bỏ qua nháy bao ngoài và hoa/thường.</summary>
     public static bool ValuesMatch(string? actual, string? expected)
         => string.Equals(Unquote(actual), Unquote(expected), StringComparison.OrdinalIgnoreCase);
 
@@ -56,11 +56,11 @@ public static class CaptureCheck
 
     /// <summary>
     /// Chặn cứng khi sai thao tác cơ học (chưa break / dừng nhầm dòng / không đọc được biểu thức);
-    /// chỉ hỏi lại khi giá trị lệch kỳ vọng hoặc nghi chưa reset.
+    /// chỉ hỏi lại khi nghi chưa reset biến. <paramref name="tcId"/> chỉ để ghi vào thông báo.
     /// </summary>
     public static CheckResult Evaluate(
         DebugSnapshot s,
-        WorkItem item,
+        string tcId,
         string expectedFile,
         int expectedLine,
         string watchExpr,
@@ -79,7 +79,7 @@ public static class CaptureCheck
 
         if (!SameFile(s.HitFile, expectedFile) || s.HitLine != expectedLine)
             return new CheckResult(CheckLevel.Block,
-                $"Dừng ở {Path.GetFileName(s.HitFile)}:{s.HitLine} — không phải dòng của {item.TcId} " +
+                $"Dừng ở {Path.GetFileName(s.HitFile)}:{s.HitLine} — không phải dòng của {tcId} " +
                 $"({Path.GetFileName(expectedFile)}:{expectedLine}).");
 
         bool hasExpr = !string.IsNullOrWhiteSpace(watchExpr);
@@ -92,7 +92,7 @@ public static class CaptureCheck
 
         if (hasExpr && previous is { } prev &&
             prev.ProcessId == s.ProcessId && prev.ProcessId != 0 &&
-            !string.Equals(prev.TcId, item.TcId, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(prev.TcId, tcId, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(prev.Expr, watchExpr, StringComparison.OrdinalIgnoreCase) &&
             ValuesMatch(prev.Value, s.ExprValue))
         {
@@ -101,17 +101,9 @@ public static class CaptureCheck
                 "biến đã được gán lại chưa? Vẫn chụp?");
         }
 
-        if (hasExpr && item.Expected.Length > 0 && !ValuesMatch(s.ExprValue, item.Expected))
-        {
-            return new CheckResult(CheckLevel.Confirm,
-                $"{watchExpr} = {s.ExprValue}, kỳ vọng {item.Expected} — LỆCH. Vẫn chụp?");
-        }
-
-        var valuePart = hasExpr
-            ? $" · {watchExpr} = {s.ExprValue}" + (item.Expected.Length > 0 ? $" (kỳ vọng {item.Expected})" : "")
-            : "";
+        var valuePart = hasExpr ? $" · {watchExpr} = {s.ExprValue}" : "";
 
         return new CheckResult(CheckLevel.Ok,
-            $"{item.TcId} · {Path.GetFileName(expectedFile)}:{expectedLine}{valuePart} · chụp được{bpNote}");
+            $"{tcId} · {Path.GetFileName(expectedFile)}:{expectedLine}{valuePart} · chụp được{bpNote}");
     }
 }

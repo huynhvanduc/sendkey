@@ -32,8 +32,6 @@ public sealed class EvidenceBarForm : Form
 
     protected override bool ShowWithoutActivation => true;
 
-    public string CmdLabel => _cmdLabel.Text.Trim();
-    public string CmdVar => _cmdVar.Text.Trim();
     public string CsLabel => _csLabel.Text.Trim();
     public string CsVar => _csVar.Text.Trim();
 

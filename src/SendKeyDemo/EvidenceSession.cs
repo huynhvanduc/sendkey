@@ -1,20 +1,6 @@
 using System.Media;
-using EnvDTE;
 
 namespace SendKeyDemo;
-
-/// <summary>Những gì EvidenceSession cần từ cửa sổ chính (MainForm cài đặt).</summary>
-public interface IEvidenceHost
-{
-    DTE? Dte { get; }
-    IReadOnlyList<MapRow>? Rows { get; }
-    string CsPathOf(MapRow row);
-    Rectangle? Region { get; }
-    void Log(string msg);
-
-    /// <summary>Validate csLabel/csVar với file .cs rồi ghi thêm 1 dòng vào mapping.csv. null = OK.</summary>
-    string? AddMapping(string cmdLabel, string cmdVar, string csLabel, string csVar);
-}
 
 /// <summary>
 /// Một đợt chụp bằng chứng. Nghe clipboard để bắt cặp label / 「biến」 copy từ file test case,
@@ -23,13 +9,12 @@ public interface IEvidenceHost
 /// </summary>
 public sealed class EvidenceSession : IDisposable
 {
-    readonly IEvidenceHost _host;
+    readonly MainForm _host;
     readonly AppSettings _settings;
     readonly EvidenceBarForm _bar = new();
 
     ClipboardWatcher? _clip;
     VsAutomation.BreakWatcher? _watcher;     // phải giữ field, xem chú thích trong BreakWatcher
-    Worklist? _list;                         // null = chế độ copy từ Excel
     LastCapture? _last;
     bool _active;
     int _shotCount;
@@ -41,9 +26,8 @@ public sealed class EvidenceSession : IDisposable
     string _targetFile = "";
     int _targetLine;
     string _watchExpr = "";
-    string _expected = "";
 
-    public EvidenceSession(IEvidenceHost host, AppSettings settings)
+    public EvidenceSession(MainForm host, AppSettings settings)
     {
         _host = host;
         _settings = settings;
@@ -53,20 +37,18 @@ public sealed class EvidenceSession : IDisposable
     public bool Active => _active;
     public EvidenceBarForm Bar => _bar;
 
-    string Progress => _list != null ? $"{_list.DoneCount}/{_list.Total}" : $"{_shotCount} ảnh";
+    string Progress => $"{_shotCount} ảnh";
 
-    WorkItem CurrentItem => new(
-        _cmdVar.Length > 0 ? $"{_cmdLabel}/{_cmdVar}" : _cmdLabel,
-        _cmdLabel, _cmdVar, _expected);
+    /// <summary>Tên cặp đang chụp, chỉ để ghi vào thông báo — vd "CHECK_INPUT/%RC%".</summary>
+    string TcId => _cmdVar.Length > 0 ? $"{_cmdLabel}/{_cmdVar}" : _cmdLabel;
 
     // ---------------- vòng đời ----------------
 
-    /// <summary><paramref name="list"/> null = chế độ copy từ Excel (nghe clipboard).</summary>
-    public void Start(Worklist? list)
+    /// <summary>Bắt đầu đợt: hiện thanh, nghe clipboard, bám sự kiện VS dừng.</summary>
+    public void Start()
     {
         Stop(keepBar: true);
         _active = true;
-        _list = list;
         _shotCount = 0;
 
         _bar.PlaceAt(_settings.StripX, _settings.StripY);
@@ -74,21 +56,13 @@ public sealed class EvidenceSession : IDisposable
 
         AttachWatcher();
 
-        if (list == null)
-        {
-            _clip = new ClipboardWatcher();
-            _clip.TextCopied += OnCopied;
-            _cmdLabel = _cmdVar = _expected = "";
-            _bar.SetCmd("", "");
-            _bar.SetCs("", "");
-            SetStatus(StripState.Pending, "Copy label trong file test case (Excel) để bắt đầu.");
-            _host.Log("Chụp bằng chứng: bắt đầu — chế độ copy từ Excel.");
-        }
-        else
-        {
-            LoadFromWorklist();
-            _host.Log($"Chụp bằng chứng: bắt đầu {list.Total} test case theo danh sách.");
-        }
+        _clip = new ClipboardWatcher();
+        _clip.TextCopied += OnCopied;
+        _cmdLabel = _cmdVar = "";
+        _bar.SetCmd("", "");
+        _bar.SetCs("", "");
+        SetStatus(StripState.Pending, "Copy label trong file test case (Excel) để bắt đầu.");
+        _host.Log("Chụp bằng chứng: bắt đầu — copy label rồi 「biến」 từ Excel.");
     }
 
     public void Stop() => Stop(keepBar: false);
@@ -109,17 +83,10 @@ public sealed class EvidenceSession : IDisposable
         {
             _settings.StripX = _bar.Location.X;
             _settings.StripY = _bar.Location.Y;
-            if (_list != null)
-            {
-                _settings.Worklist = _list.ToLines();
-                _settings.WorklistIndex = _list.Index;
-                _settings.WorklistDone = _list.DoneIds();
-            }
             _settings.Save();
         }
 
         _active = false;
-        _list = null;
         _last = null;
         if (!keepBar) _bar.Hide();
     }
@@ -129,7 +96,7 @@ public sealed class EvidenceSession : IDisposable
     {
         _watcher?.Dispose();
         _watcher = null;
-        if (_host.Dte is not { } dte) return;
+        if (_host.CurrentDte() is not { } dte) return;
 
         try { _watcher = new VsAutomation.BreakWatcher(dte, OnEnterBreak); }
         catch (Exception ex) { _host.Log("Không bám được sự kiện dừng của VS: " + ex.Message); }
@@ -153,7 +120,7 @@ public sealed class EvidenceSession : IDisposable
 
     void ApplyCopied(string raw)
     {
-        if (!_active || _list != null) return;
+        if (!_active) return;
 
         // Quy tắc duy nhất: trong 「 」 là biến/mệnh đề, ngoài ngoặc là label.
         if (CopiedText.Classify(raw) is not { } piece) return;
@@ -170,7 +137,7 @@ public sealed class EvidenceSession : IDisposable
         _bar.SetCmd(_cmdLabel, _cmdVar);
         _targetLine = 0;
 
-        var rows = _host.Rows;
+        var rows = _host.GetMapRows();
         if (rows == null)
         {
             _bar.SetCs("", "");
@@ -222,15 +189,6 @@ public sealed class EvidenceSession : IDisposable
         }
     }
 
-    void LoadFromWorklist()
-    {
-        if (_list?.Current is not { } item) { SetStatus(StripState.Ok, "Hết danh sách."); return; }
-        _cmdLabel = item.CmdLabel;
-        _cmdVar = item.CmdVar;
-        _expected = item.Expected;
-        Prefill();
-    }
-
     // ---------------- chạy: ghi mapping nếu cần, rồi đặt breakpoint ----------------
 
     /// <summary>Enter trong thanh, nút ⏎ Chạy, hoặc hotkey GotoCurrent.</summary>
@@ -255,7 +213,7 @@ public sealed class EvidenceSession : IDisposable
             return;
         }
 
-        var rows = _host.Rows;
+        var rows = _host.GetMapRows();
         if (rows == null) { SetStatus(StripState.Block, "Chưa nạp được mapping.csv."); Beep(StripState.Block); return; }
 
         var cmdVarForLookup = _cmdVar.Length > 0 ? _cmdVar : null;
@@ -271,7 +229,7 @@ public sealed class EvidenceSession : IDisposable
                 Beep(StripState.Block);
                 return;
             }
-            rows = _host.Rows;
+            rows = _host.GetMapRows();
             if (rows == null) { SetStatus(StripState.Block, "Chưa nạp lại được mapping.csv."); return; }
             res = Mapping.Resolve(rows, _cmdLabel, cmdVarForLookup);
         }
@@ -293,7 +251,7 @@ public sealed class EvidenceSession : IDisposable
                       "dùng dòng có sẵn. Muốn đổi thì sửa thẳng mapping.csv.");
         }
 
-        var csp = _host.CsPathOf(row);
+        var csp = _host.EffectiveCsPath(row);
         if (string.IsNullOrWhiteSpace(csp) || !File.Exists(csp))
         {
             SetStatus(StripState.Block, $"Không thấy file .cs: {csp}");
@@ -325,7 +283,7 @@ public sealed class EvidenceSession : IDisposable
             _host.Log($"Chụp: ⚠ dòng {Path.GetFileName(csp)}:{ll.Line} không nhắc tới \"{_watchExpr}\" — " +
                       "giá trị có thể chưa được gán ở đây.");
 
-        if (_host.Dte is not { } dte)
+        if (_host.CurrentDte() is not { } dte)
         {
             SetStatus(StripState.Block, "Chưa chọn instance VS — mở cửa sổ cấu hình bấm Refresh.");
             Beep(StripState.Block);
@@ -356,14 +314,14 @@ public sealed class EvidenceSession : IDisposable
     {
         if (!_active || _targetLine == 0) return null;
 
-        if (_host.Dte is not { } dte)
+        if (_host.CurrentDte() is not { } dte)
         {
             SetStatus(StripState.Block, "Chưa chọn instance VS.");
             return new CheckResult(CheckLevel.Block, "Chưa chọn instance VS.");
         }
 
         var snap = VsAutomation.ReadDebugState(dte, _targetFile, _watchExpr);
-        var result = CaptureCheck.Evaluate(snap, CurrentItem, _targetFile, _targetLine, _watchExpr, _last);
+        var result = CaptureCheck.Evaluate(snap, TcId, _targetFile, _targetLine, _watchExpr, _last);
 
         if (fromEvent && !snap.InBreakMode) return result;   // chưa tới lúc, im lặng
 
@@ -384,14 +342,14 @@ public sealed class EvidenceSession : IDisposable
             return;
         }
 
-        if (_host.Region is not { } region)
+        if (_host.SavedRegion is not { } region)
         {
             SetStatus(StripState.Block, $"Chưa khoanh vùng chụp — bấm {_settings.DefineRegionHotkey} một lần.");
             Beep(StripState.Block);
             return;
         }
 
-        var item = CurrentItem;
+        var tcId = TcId;
         var result = Recheck();
         if (result == null) return;
 
@@ -425,27 +383,15 @@ public sealed class EvidenceSession : IDisposable
             return;
         }
 
-        if (_host.Dte is { } dteNow)
+        if (_host.CurrentDte() is { } dteNow)
         {
             var snapNow = VsAutomation.ReadDebugState(dteNow, _targetFile, _watchExpr);
-            _last = new LastCapture(snapNow.ProcessId, item.TcId, _watchExpr, snapNow.ExprValue);
+            _last = new LastCapture(snapNow.ProcessId, tcId, _watchExpr, snapNow.ExprValue);
         }
 
         _shotCount++;
-        _host.Log($"Chụp XONG {item.TcId} → clipboard (Ctrl+V để dán). {Progress}");
+        _host.Log($"Chụp XONG {tcId} → clipboard (Ctrl+V để dán). {Progress}");
         Beep(StripState.Ok);
-
-        if (_list != null)
-        {
-            _list.MarkDone(item.TcId);
-            _settings.WorklistIndex = _list.Index;
-            _settings.WorklistDone = _list.DoneIds();
-            _settings.Save();
-
-            if (_list.MoveNextPending()) { LoadFromWorklist(); return; }
-            SetStatus(StripState.Ok, "✓ đã chụp — HẾT danh sách. Ctrl+V để dán ảnh cuối.");
-            return;
-        }
 
         SetStatus(StripState.Ok, "✓ Đã chụp — Ctrl+V để dán. Copy cặp tiếp theo từ Excel.");
     }

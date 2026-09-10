@@ -232,24 +232,6 @@ public static class Mapping
         return problems;
     }
 
-    /// <summary>Tách 1 dòng batch thành (cmdLabel, cmdVar): ngăn bằng Tab hoặc ≥2 dấu cách; không có = cả dòng là label.</summary>
-    public static (string Label, string Var) SplitBatchLine(string raw)
-    {
-        var s = (raw ?? "").Trim();
-        int tab = s.IndexOf('\t');
-        if (tab >= 0) return (s[..tab].Trim(), s[(tab + 1)..].Trim());
-        for (int i = 0; i + 1 < s.Length; i++)
-        {
-            if (s[i] == ' ' && s[i + 1] == ' ')
-            {
-                int j = i;
-                while (j < s.Length && s[j] == ' ') j++;
-                return (s[..i].Trim(), s[j..].Trim());
-            }
-        }
-        return (s, "");
-    }
-
     public static LookupResult Resolve(IReadOnlyList<MapRow> rows, string cmdLabelRaw, string? cmdVarRaw)
     {
         var label = NormalizeLabel(cmdLabelRaw);
