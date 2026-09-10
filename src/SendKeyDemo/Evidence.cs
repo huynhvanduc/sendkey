@@ -452,161 +452,142 @@ public sealed class EvidenceSession : IDisposable
 public enum StripState { Idle, Pending, Ok, Confirm, Block }
 
 /// <summary>
-/// Thanh làm việc luôn nổi trên cùng trong lúc chụp bằng chứng.
-/// Hàng 1: cặp vừa copy từ Excel (cmdLabel / cmdVar trong 「 」).
-/// Hàng 2: cặp C# tương ứng — tự điền nếu mapping.csv đã có, KHÔNG có thì để trống
-///          cho người dùng gõ rồi Enter (ghi thêm dòng vào mapping.csv rồi chạy luôn).
-/// Hàng 3: đèn tín hiệu + tiến độ.
-/// Cố ý không cướp focus khi hiện/cập nhật — dev đang gõ trong VS hoặc Excel.
+/// Thanh nổi 1 dòng, luôn trên cùng trong lúc chụp bằng chứng:
+///   ●  CHECK_INPUT 「%RC%」「%TAX%」  →  rc, tax · Program.cs:42 · 1/2
+/// Màu chấm (và viền thanh): xám = chờ copy · xanh dương = chờ F5 · xanh lá = chụp được · vàng = ⚠ · đỏ = ❌.
+/// Dòng 2 chỉ hiện khi vàng/đỏ, đúng 1 câu lý do. Chưa có mapping thì ô nhập C# hiện ngay sau mũi tên
+/// (ca goto chỉ 1 ô csharpLabel); Enter = <see cref="InputSubmitted"/>.
+/// Không cướp focus khi hiện/cập nhật — chỉ lấy focus lúc cần gõ (<see cref="AskInput"/>).
+/// Kéo thanh ở bất kỳ chỗ nào trừ ô nhập; double-click = mở cửa sổ cấu hình.
 /// </summary>
 public sealed class EvidenceBarForm : Form
 {
-    readonly TextBox _cmdLabel = new();
-    readonly TextBox _cmdVar = new();
-    readonly TextBox _csLabel = new();
-    readonly TextBox _csVar = new();
-    readonly Button _run = new() { Text = "⏎ Chạy", AutoSize = true };
-    readonly Panel _status = new() { Dock = DockStyle.Bottom, Height = 30 };
+    const int BarWidth = 640;   // đơn vị 96-dpi, quy đổi theo màn hình lúc hiện
+
+    static readonly Color InputBack = Color.FromArgb(58, 44, 20);
+
+    readonly Label _dot = new() { Text = "●", AutoSize = true, Margin = new Padding(0, 1, 6, 0) };
+    readonly Label _cmd = new() { AutoSize = true, Margin = new Padding(0, 4, 6, 0) };
+    readonly Label _arrow = new() { Text = "→", AutoSize = true, Margin = new Padding(0, 4, 6, 0) };
+    readonly Label _target = new() { AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
+    readonly TextBox _csLabel = new() { Visible = false, Margin = new Padding(0, 2, 6, 0) };
+    readonly TextBox _csVar = new() { Visible = false, Margin = new Padding(0, 2, 0, 0) };
+    readonly Label _reason = new() { AutoSize = true, Visible = false, Margin = new Padding(22, 3, 0, 1) };
 
     StripState _state = StripState.Idle;
-    string _statusText = "";
-    string _progress = "";
+    bool _labelOnly;
 
+    /// <summary>Enter trong ô nhập: (csharpLabel, csharpVar); ca goto thì csharpVar = "".</summary>
+    public event Action<string, string>? InputSubmitted;
     public event Action? RunRequested;
     public event Action? OpenConfigRequested;
 
     protected override bool ShowWithoutActivation => true;
 
-    public string CsLabel => _csLabel.Text.Trim();
-    public string CsVar => _csVar.Text.Trim();
+    [DllImport("user32.dll")] static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     public EvidenceBarForm()
     {
         FormBorderStyle = FormBorderStyle.None;
+        MaximizeBox = false;
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        ClientSize = new Size(780, 116);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        AutoSize = true;
+        AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        Padding = new Padding(2);                      // chừa viền màu trạng thái
         BackColor = Theme.PanelBackground;
         DoubleBuffered = true;
-        KeyPreview = true;
 
-        var grid = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill, ColumnCount = 6, RowCount = 2,
-            Padding = new Padding(10, 8, 10, 4), BackColor = Theme.PanelBackground,
-        };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 38));   // nhãn hàng
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));    // label
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 16));   // 「
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));    // var
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 16));   // 」
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));       // nút
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        var text = new Font("Segoe UI", 10f);
+        _dot.Font = new Font("Segoe UI", 12f);
+        _cmd.Font = _arrow.Font = _target.Font = _reason.Font = text;
+        _cmd.ForeColor = _arrow.ForeColor = Theme.TextSecondary;
+        _target.ForeColor = _reason.ForeColor = Theme.TextPrimary;
 
-        foreach (var tb in new[] { _cmdLabel, _cmdVar, _csLabel, _csVar })
+        foreach (var tb in new[] { _csLabel, _csVar })
         {
-            tb.Dock = DockStyle.Fill;
             tb.BorderStyle = BorderStyle.FixedSingle;
-            tb.BackColor = Color.FromArgb(30, 33, 41);
+            tb.BackColor = InputBack;
             tb.ForeColor = Theme.TextPrimary;
-            tb.Font = new Font("Consolas", 9.5f);
-            tb.Margin = new Padding(3, 4, 3, 4);
+            tb.Font = new Font("Consolas", 10f);
             tb.KeyDown += OnFieldKeyDown;
         }
 
-        // Hàng cmd chỉ để xem — clipboard điền vào, sửa tay không có tác dụng gì thêm.
-        _cmdLabel.ReadOnly = _cmdVar.ReadOnly = true;
-        _cmdLabel.ForeColor = _cmdVar.ForeColor = Theme.TextSecondary;
-        _cmdVar.PlaceholderText = "copy phần trong 「 」";
-        _cmdLabel.PlaceholderText = "copy label (dòng trên)";
-        _csLabel.PlaceholderText = "csharpLabel — gõ nếu chưa có";
-        _csVar.PlaceholderText = "csharpVar — gõ nếu chưa có";
+        var line1 = new FlowLayoutPanel
+        {
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false,
+            Margin = new Padding(0), BackColor = Theme.PanelBackground,
+        };
+        line1.Controls.AddRange(new Control[] { _dot, _cmd, _arrow, _target, _csLabel, _csVar });
 
-        grid.Controls.Add(RowCaption("cmd"), 0, 0);
-        grid.Controls.Add(_cmdLabel, 1, 0);
-        grid.Controls.Add(Bracket("「"), 2, 0);
-        grid.Controls.Add(_cmdVar, 3, 0);
-        grid.Controls.Add(Bracket("」"), 4, 0);
+        var body = new TableLayoutPanel
+        {
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, Dock = DockStyle.Fill,
+            Padding = new Padding(10, 4, 12, 4), BackColor = Theme.PanelBackground,
+        };
+        body.Controls.Add(line1, 0, 0);
+        body.Controls.Add(_reason, 0, 1);
+        Controls.Add(body);
 
-        grid.Controls.Add(RowCaption("C#"), 0, 1);
-        grid.Controls.Add(_csLabel, 1, 1);
-        grid.Controls.Add(Bracket(""), 2, 1);
-        grid.Controls.Add(_csVar, 3, 1);
-        grid.Controls.Add(Bracket(""), 4, 1);
+        foreach (var c in new Control[] { this, body, line1, _dot, _cmd, _arrow, _target, _reason })
+            c.MouseDown += DragOrOpenConfig;
 
-        _run.Margin = new Padding(6, 4, 0, 4);
-        _run.FlatStyle = FlatStyle.Flat;
-        _run.BackColor = Color.FromArgb(45, 50, 62);
-        _run.ForeColor = Theme.TextPrimary;
-        _run.FlatAppearance.BorderColor = Theme.AccentStart;
-        _run.Click += (_, _) => RunRequested?.Invoke();
-        grid.Controls.Add(_run, 5, 1);
-
-        _status.Paint += PaintStatus;
-        _status.DoubleClick += (_, _) => OpenConfigRequested?.Invoke();
-
-        Controls.Add(grid);
-        Controls.Add(_status);
+        SetPair("", Array.Empty<string>(), "");
+        SetStatus(StripState.Idle, null);
     }
 
-    static Label RowCaption(string text) => new()
+    protected override void OnLoad(EventArgs e)
     {
-        Text = text, Dock = DockStyle.Fill, ForeColor = Theme.TextSecondary,
-        Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft,
-    };
-
-    static Label Bracket(string text) => new()
-    {
-        Text = text, Dock = DockStyle.Fill, ForeColor = Theme.AccentStart,
-        Font = new Font("Segoe UI", 11f), TextAlign = ContentAlignment.MiddleCenter,
-    };
-
-    void OnFieldKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.KeyCode is not (Keys.Enter or Keys.Return)) return;
-        e.SuppressKeyPress = true;
-        RunRequested?.Invoke();
+        base.OnLoad(e);
+        // Đặt cỡ lúc hiện (đã biết DPI của màn hình), không dùng px cứng trong constructor.
+        int w = LogicalToDeviceUnits(BarWidth);
+        MinimumSize = new Size(w, 0);
+        MaximumSize = new Size(w, 0);
+        _csLabel.Width = LogicalToDeviceUnits(180);
+        _csVar.Width = LogicalToDeviceUnits(220);
+        _reason.MaximumSize = new Size(w - LogicalToDeviceUnits(50), 0);
     }
 
-    /// <summary>Điền cặp vừa copy. <paramref name="cmdVar"/> null = giữ nguyên ô cũ.</summary>
-    public void SetCmd(string cmdLabel, string? cmdVar)
+    // ---------------- API cho EvidenceSession ----------------
+
+    /// <summary>Cái vừa copy + đích đã tra (vd "rc, tax · Program.cs:42 · 1/2"). Gọi hàm này cũng ẩn ô nhập.</summary>
+    public void SetPair(string cmdLabel, IReadOnlyList<string> cmdItems, string target)
     {
-        _cmdLabel.Text = cmdLabel;
-        if (cmdVar != null) _cmdVar.Text = cmdVar;
+        var cmd = $"{cmdLabel} {string.Concat(cmdItems.Select(i => $"「{i}」"))}".Trim();
+        _cmd.Text = cmd.Length > 0 ? Clip(cmd, 60) : "Copy label trong Excel để bắt đầu";
+        _target.Text = Clip(target, 70);
+        _labelOnly = false;
+        _csLabel.Text = _csVar.Text = "";
+        SetInputVisible(false);
     }
 
-    /// <summary>Điền cặp C# tra được. Chuỗi rỗng = chưa có trong mapping.csv, tô sáng cho người dùng gõ.</summary>
-    public void SetCs(string csLabel, string csVar)
+    /// <summary>
+    /// Hiện ô nhập C# ngay sau mũi tên (labelOnly = ca goto: chỉ 1 ô csharpLabel), lấy focus vào ô trống đầu tiên.
+    /// <paramref name="forItem"/> là 「」 đang thiếu mapping, hiện làm gợi ý trong ô.
+    /// </summary>
+    public void AskInput(bool labelOnly, string forItem, string csLabel, string csVar)
     {
-        _csLabel.Text = csLabel;
-        _csVar.Text = csVar;
-        Highlight(_csLabel, csLabel.Length == 0);
-        Highlight(_csVar, csVar.Length == 0);
-    }
+        FillInput(labelOnly, forItem, csLabel, csVar);
+        SetInputVisible(true);
 
-    static void Highlight(TextBox tb, bool needsInput)
-        => tb.BackColor = needsInput ? Color.FromArgb(58, 44, 20) : Color.FromArgb(30, 33, 41);
-
-    /// <summary>Đưa con trỏ vào ô C# đầu tiên còn trống (nếu có) để gõ ngay.</summary>
-    public void FocusFirstEmptyCs()
-    {
-        var target = _csLabel.Text.Trim().Length == 0 ? _csLabel
-                   : _csVar.Text.Trim().Length == 0 ? _csVar
-                   : null;
-        if (target == null) return;
         Activate();
-        target.Focus();
-        target.SelectionStart = target.TextLength;
+        var box = !labelOnly && _csLabel.Text.Trim().Length > 0 ? _csVar : _csLabel;
+        box.Focus();
+        box.SelectionStart = box.TextLength;
     }
 
-    public void SetStatus(StripState state, string text, string progress = "")
+    /// <summary>reason chỉ hiện ở dòng 2 khi state là Confirm/Block; null/rỗng = không hiện dòng 2.</summary>
+    public void SetStatus(StripState state, string? reason)
     {
         _state = state;
-        _statusText = text ?? "";
-        _progress = progress ?? "";
-        _status.Invalidate();
+        _dot.ForeColor = DotColor;
+        bool show = (state is StripState.Confirm or StripState.Block) && !string.IsNullOrWhiteSpace(reason);
+        _reason.Text = show ? (state == StripState.Block ? "❌  " : "⚠  ") + reason : "";
+        _reason.Visible = show;
+        Invalidate();   // viền đổi màu theo chấm
     }
 
     public void PlaceAt(int? x, int? y)
@@ -621,6 +602,45 @@ public sealed class EvidenceBarForm : Form
         Location = new Point(screen.X + (screen.Width - Width) / 2, screen.Y + 8);
     }
 
+    // ---------------- bên trong ----------------
+
+    void FillInput(bool labelOnly, string forItem, string csLabel, string csVar)
+    {
+        _labelOnly = labelOnly;
+        _csLabel.Text = csLabel;
+        _csVar.Text = labelOnly ? "" : csVar;
+        _csLabel.PlaceholderText = labelOnly && forItem.Length > 0 ? $"csharpLabel cho 「{forItem}」" : "csharpLabel";
+        _csVar.PlaceholderText = forItem.Length > 0 ? $"csharpVar cho 「{forItem}」" : "csharpVar";
+    }
+
+    void SetInputVisible(bool visible)
+    {
+        _csLabel.Visible = visible;
+        _csVar.Visible = visible && !_labelOnly;
+        _target.Visible = !visible && _target.Text.Length > 0;
+        _arrow.Visible = visible || _target.Text.Length > 0;
+    }
+
+    void OnFieldKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode is not (Keys.Enter or Keys.Return)) return;
+        e.SuppressKeyPress = true;
+        if (InputSubmitted != null) InputSubmitted(_csLabel.Text.Trim(), _labelOnly ? "" : _csVar.Text.Trim());
+        else RunRequested?.Invoke();   // TẠM: EvidenceSession hiện tại vẫn nghe RunRequested + đọc CsLabel/CsVar
+    }
+
+    // Kéo thanh ở bất kỳ chỗ nào (trừ ô nhập); double-click = mở cửa sổ cấu hình.
+    void DragOrOpenConfig(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        if (e.Clicks >= 2) { OpenConfigRequested?.Invoke(); return; }
+        const int WM_NCLBUTTONDOWN = 0xA1, HTCAPTION = 2;
+        ReleaseCapture();
+        SendMessage(Handle, WM_NCLBUTTONDOWN, (IntPtr)HTCAPTION, IntPtr.Zero);
+    }
+
+    static string Clip(string s, int max) => s.Length <= max ? s : s[..(max - 1)] + "…";
+
     Color DotColor => _state switch
     {
         StripState.Ok => Color.FromArgb(74, 222, 128),
@@ -630,59 +650,59 @@ public sealed class EvidenceBarForm : Form
         _ => Color.FromArgb(148, 152, 164),
     };
 
-    void PaintStatus(object? sender, PaintEventArgs e)
-    {
-        var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-        g.Clear(Theme.PanelBackground);
-
-        using (var dot = new SolidBrush(DotColor))
-            g.FillEllipse(dot, 12, _status.Height / 2f - 5, 10, 10);
-
-        using var font = new Font("Segoe UI", 9f);
-        using var progressFont = new Font("Consolas", 8.5f, FontStyle.Bold);
-
-        float rightPad = 12;
-        if (_progress.Length > 0)
-        {
-            var size = g.MeasureString(_progress, progressFont);
-            using var pb = new SolidBrush(Theme.TextSecondary);
-            g.DrawString(_progress, progressFont, pb,
-                _status.Width - size.Width - 12, (_status.Height - size.Height) / 2f);
-            rightPad = size.Width + 24;
-        }
-
-        using var tb = new SolidBrush(Theme.TextPrimary);
-        using var fmt = new StringFormat
-        {
-            LineAlignment = StringAlignment.Center,
-            Trimming = StringTrimming.EllipsisCharacter,
-            FormatFlags = StringFormatFlags.NoWrap,
-        };
-        g.DrawString(_statusText, font, tb,
-            new RectangleF(30, 0, _status.Width - 30 - rightPad, _status.Height), fmt);
-    }
-
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        var body = new RectangleF(0.5f, 0.5f, ClientSize.Width - 1, ClientSize.Height - 1);
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using var path = Theme.RoundedRect(body, 8f);
-        using var pen = new Pen(Color.FromArgb(80, DotColor), 1.5f);
-        e.Graphics.DrawPath(pen, path);
+        using var pen = new Pen(DotColor, 2f);
+        e.Graphics.DrawRectangle(pen, 1, 1, ClientSize.Width - 2, ClientSize.Height - 2);
     }
 
-    // Kéo thanh bằng vùng trống (ô nhập vẫn bấm vào gõ được bình thường).
-    protected override void WndProc(ref Message m)
-    {
-        const int WM_NCHITTEST = 0x0084;
-        const int HTCLIENT = 1, HTCAPTION = 2;
+    // ---------------- TẠM: API cũ mà EvidenceSession hiện tại còn gọi ----------------
+    // sendkey-4d chuyển EvidenceSession sang SetPair / AskInput / SetStatus(state, reason) xong thì xoá cả khối này.
 
-        base.WndProc(ref m);
-        if (m.Msg == WM_NCHITTEST && m.Result.ToInt32() == HTCLIENT)
-            m.Result = new IntPtr(HTCAPTION);
+    string _oldLabel = "", _oldVar = "";
+
+    public string CsLabel => _csLabel.Text.Trim();
+    public string CsVar => _csVar.Text.Trim();
+
+    public void SetCmd(string cmdLabel, string? cmdVar)
+    {
+        _oldLabel = cmdLabel;
+        if (cmdVar != null) _oldVar = cmdVar;
+        SetPair(_oldLabel, _oldVar.Length > 0 ? new[] { _oldVar } : Array.Empty<string>(), "");
+    }
+
+    public void SetCs(string csLabel, string csVar)
+    {
+        FillInput(false, _oldVar, csLabel, csVar);
+        if (csLabel.Length > 0 && csVar.Length > 0)
+        {
+            _target.Text = Clip($"{csLabel} / {csVar}", 70);
+            SetInputVisible(false);            // giữ chữ trong ô (ẩn) vì Run() cũ đọc CsLabel/CsVar
+        }
+        else if (_oldLabel.Length > 0)
+            SetInputVisible(true);
+    }
+
+    public void FocusFirstEmptyCs()
+    {
+        if (!_csLabel.Visible) return;
+        var box = _csLabel.Text.Trim().Length == 0 ? _csLabel
+                : _csVar.Visible && _csVar.Text.Trim().Length == 0 ? _csVar
+                : null;
+        if (box == null) return;
+        Activate();
+        box.Focus();
+        box.SelectionStart = box.TextLength;
+    }
+
+    public void SetStatus(StripState state, string text, string progress)
+    {
+        SetStatus(state, text);
+        if (state is StripState.Confirm or StripState.Block) return;
+        // Trạng thái bình thường: hiện câu hướng dẫn cũ ở chỗ đích để bản chuyển tiếp vẫn đọc được.
+        _target.Text = Clip(progress.Length > 0 ? $"{text} · {progress}" : text, 90);
+        SetInputVisible(_csLabel.Visible);
     }
 }
 
