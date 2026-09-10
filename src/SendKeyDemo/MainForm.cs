@@ -485,7 +485,7 @@ public class MainForm : Form
     {
         if (_savedRegion == null)
             MessageBox.Show(this,
-                $"Sắp cửa sổ VS sao cho thấy CẢ dòng code lẫn cửa sổ Watch, rồi bấm {_settings.DefineRegionHotkey} " +
+                $"Sắp cửa sổ VS sao cho thấy tab tên file, dòng code và cửa sổ Watch, rồi bấm {_settings.DefineRegionHotkey} " +
                 "để khoanh vùng chụp. Chỉ cần làm một lần cho cả đợt.",
                 "Còn một bước", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
@@ -545,11 +545,14 @@ public class MainForm : Form
 
     void DefineRegion()
     {
-        using var sel = new RegionSelector();
+        // Có ClipboardWidth/HeightInches thì khung cỡ cố định (click để chốt), không thì kéo tự do.
+        using var sel = new RegionSelector(_settings.ClipboardPixelSize);
         sel.ShowDialog();
         if (sel.Result is not { } r) return;
         _savedRegion = r;
         Log($"Đã nhớ vùng chụp {r.Width}x{r.Height} — từ giờ {_settings.CaptureRegionHotkey} chụp đúng vùng này.");
+        if (_settings.ClipboardPixelSize == null)
+            Log("Mẹo: điền ClipboardWidthInches / ClipboardHeightInches trong settings.json để khung chụp luôn cùng một cỡ.");
     }
 
     /// <summary>Phím chụp: đang trong đợt bằng chứng thì chụp CÓ GÁC CỔNG, ngoài đợt thì chụp thường.</summary>

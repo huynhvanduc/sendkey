@@ -762,3 +762,30 @@ public class AppSettingsTests
         Assert.True(s.TopMost);
     }
 }
+
+// ==================== khung chụp cỡ cố định ====================
+
+public class CaptureFrameTests
+{
+    static readonly Size Frame = new(1000, 500);
+    static readonly Rectangle Screen1 = new(0, 0, 1920, 1080);
+
+    [Fact]
+    public void Frame_is_centered_on_the_cursor()
+        => Assert.Equal(new Rectangle(460, 290, 1000, 500),
+            ScreenCapture.PlaceFixed(new Point(960, 540), Frame, Screen1));
+
+    [Fact]
+    public void Frame_is_pushed_back_inside_the_screen_near_edges()
+    {
+        Assert.Equal(new Rectangle(0, 0, 1000, 500),
+            ScreenCapture.PlaceFixed(new Point(10, 10), Frame, Screen1));
+        Assert.Equal(new Rectangle(920, 580, 1000, 500),
+            ScreenCapture.PlaceFixed(new Point(1915, 1075), Frame, Screen1));
+    }
+
+    [Fact]
+    public void Frame_stays_on_a_second_monitor_with_offset()
+        => Assert.Equal(new Rectangle(1920, 0, 1000, 500),
+            ScreenCapture.PlaceFixed(new Point(1925, 5), Frame, new Rectangle(1920, 0, 1920, 1080)));
+}

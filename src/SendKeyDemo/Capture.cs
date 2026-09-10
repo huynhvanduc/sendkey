@@ -81,6 +81,53 @@ public static class ScreenCapture
         }
     }
 
+    /// <summary>
+    /// Chụp bằng chứng "sạch": ẩn <paramref name="hide"/> (thanh nổi) và dời chuột ra ngoài vùng chụp để
+    /// ảnh không dính thanh nổi hay tooltip giá trị biến của VS, đợi màn hình vẽ lại rồi mới chụp.
+    /// Xong trả chuột + thanh về như cũ.
+    /// </summary>
+    public static Result GrabClean(Rectangle region, AppSettings settings, Form? hide)
+    {
+        var cursor = Cursor.Position;
+        bool hidden = hide is { Visible: true };
+        try
+        {
+            if (hidden) hide!.Hide();
+            Cursor.Position = OutsidePoint(region);
+            Thread.Sleep(250);   // đủ cho tooltip của VS tắt và DWM vẽ lại chỗ thanh nổi vừa ẩn
+            return Grab(region, settings, saveFile: false);
+        }
+        finally
+        {
+            Cursor.Position = cursor;
+            if (hidden) hide!.Show();   // thanh có ShowWithoutActivation nên không cướp focus
+        }
+    }
+
+    // Một điểm ngay ngoài vùng chụp (phải / trái / dưới / trên) mà vẫn nằm trên một màn hình thật.
+    static Point OutsidePoint(Rectangle region)
+    {
+        var r = Rectangle.Inflate(region, 40, 40);
+        var mid = new Point(region.X + region.Width / 2, region.Y + region.Height / 2);
+        Point[] candidates = { new(r.Right, mid.Y), new(r.Left, mid.Y), new(mid.X, r.Bottom), new(mid.X, r.Top) };
+        foreach (var p in candidates)
+            if (Screen.AllScreens.Any(s => s.Bounds.Contains(p))) return p;
+        var vs = SystemInformation.VirtualScreen;
+        return new Point(vs.Right - 1, vs.Bottom - 1);   // vùng chụp phủ kín mọi màn hình — đành ra góc
+    }
+
+    /// <summary>
+    /// Khung cỡ cố định <paramref name="size"/> đặt tâm tại <paramref name="center"/>, đẩy vào trong
+    /// <paramref name="bounds"/> (màn hình đang trỏ) để không tràn ra ngoài.
+    /// </summary>
+    public static Rectangle PlaceFixed(Point center, Size size, Rectangle bounds)
+    {
+        int x = center.X - size.Width / 2, y = center.Y - size.Height / 2;
+        x = Math.Max(bounds.Left, Math.Min(x, bounds.Right - size.Width));
+        y = Math.Max(bounds.Top, Math.Min(y, bounds.Bottom - size.Height));
+        return new Rectangle(x, y, size.Width, size.Height);
+    }
+
     // Clipboard hay bận vì app khác đang giữ (Excel, trình duyệt) -> thử lại vài nhịp thay vì ném ngay.
     static void SetClipboardImage(Bitmap bmp)
     {
@@ -111,6 +158,8 @@ public static class ScreenCapture
 /// Overlay phủ TOÀN BỘ các màn hình (virtual screen): nền tối có vignette nhẹ (đậm
 /// dần ra rìa) thay vì màu đen phẳng, fade-in nhanh lúc mở, cho user kéo chuột chọn
 /// một khung chữ nhật viền gradient. Trả về Rectangle theo tọa độ màn hình thật.
+/// Có <c>fixedSize</c> (từ ClipboardWidth/HeightInches) thì không kéo tự do: khung đúng cỡ chạy theo
+/// chuột, click để chốt — ảnh bằng chứng luôn cùng một cỡ, dán vào Excel không bị méo.
 /// </summary>
 public sealed class RegionSelector : Form
 {
@@ -125,11 +174,14 @@ public sealed class RegionSelector : Form
     private readonly Stopwatch _fadeStopwatch = new();
     private Brush? _vignetteBrush;
 
-    // Kết quả: null nếu user hủy (Esc / click không kéo)
+    private readonly Size? _fixedSize;   // null = kéo tự do
+
+    // Kết quả: null nếu user hủy (Esc / click không kéo / click phải)
     public Rectangle? Result { get; private set; }
 
-    public RegionSelector()
+    public RegionSelector(Size? fixedSize = null)
     {
+        _fixedSize = fixedSize;
         // Phủ hết mọi màn hình, kể cả tọa độ âm (màn bên trái màn chính)
         var vs = SystemInformation.VirtualScreen;
         StartPosition = FormStartPosition.Manual;
@@ -140,7 +192,7 @@ public sealed class RegionSelector : Form
         TopMost = true;
         Opacity = 0.0;
         BackColor = Color.Black;
-        Cursor = Cursors.Cross;
+        Cursor = fixedSize == null ? Cursors.Cross : Cursors.SizeAll;
         DoubleBuffered = true;
 
         KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) { Result = null; Close(); } };
@@ -161,6 +213,7 @@ public sealed class RegionSelector : Form
     {
         base.OnLoad(e);
         _vignetteBrush = BuildVignetteBrush(ClientRectangle);
+        if (_fixedSize != null) PlaceFrame(PointToClient(Cursor.Position));
         _fadeStopwatch.Start();
         _fadeTimer.Start();
     }
@@ -180,8 +233,27 @@ public sealed class RegionSelector : Form
         };
     }
 
+    // Khung cỡ cố định chạy theo chuột, không tràn ra khỏi màn hình đang trỏ.
+    private void PlaceFrame(Point client)
+    {
+        var screen = RectangleToClient(Screen.FromPoint(PointToScreen(client)).Bounds);
+        _selection = ScreenCapture.PlaceFixed(client, _fixedSize!.Value, screen);
+        Invalidate();
+    }
+
     private void OnMouseDown(object? s, MouseEventArgs e)
     {
+        if (_fixedSize != null)
+        {
+            // Khung cỡ cố định: click trái = chốt ở chỗ đang đứng, click phải = huỷ.
+            PlaceFrame(e.Location);
+            Result = e.Button == MouseButtons.Left
+                ? new Rectangle(PointToScreen(_selection.Location), _selection.Size)
+                : null;
+            Close();
+            return;
+        }
+
         if (e.Button != MouseButtons.Left) return;
         _fadeTimer.Stop();
         Opacity = TargetOverlayOpacity;
@@ -192,6 +264,7 @@ public sealed class RegionSelector : Form
 
     private void OnMouseMove(object? s, MouseEventArgs e)
     {
+        if (_fixedSize != null) { PlaceFrame(e.Location); return; }
         if (!_dragging) return;
         // Chuẩn hóa để kéo được theo mọi hướng
         _selection = Rectangle.FromLTRB(
@@ -240,7 +313,9 @@ public sealed class RegionSelector : Form
 
     private void DrawSizeLabel(Graphics g)
     {
-        string label = $"{_selection.Width} x {_selection.Height}";
+        string label = _fixedSize == null
+            ? $"{_selection.Width} x {_selection.Height}"
+            : $"{_selection.Width} x {_selection.Height}   ·   click để chốt, Esc để huỷ";
         using var font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
         var textSize = g.MeasureString(label, font);
         var pillRect = new RectangleF(_selection.X, Math.Max(0, _selection.Y - textSize.Height - 14),

@@ -377,7 +377,8 @@ public sealed class EvidenceSession : IDisposable
         }
 
         // Không lưu PNG: ảnh vào thẳng clipboard để dán vào tài liệu bằng chứng.
-        var shot = ScreenCapture.Grab(region, _settings, saveFile: false);
+        // Ẩn thanh nổi + dời chuột ra ngoài vùng trước khi chụp để ảnh không dính thanh / tooltip.
+        var shot = ScreenCapture.GrabClean(region, _settings, _bar);
         if (!shot.Ok)
         {
             SetStatus(StripState.Block, shot.Message);

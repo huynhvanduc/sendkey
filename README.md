@@ -45,8 +45,10 @@ Nút **Kiểm tra** cạnh ô mapping.csv soát cặp bị trùng và label khô
 
 1. Trỏ **mapping.csv** + **target .cs**, chọn instance VS.
 2. Bấm **▶ Bắt đầu chụp bằng chứng**. Cửa sổ thu về tray, chỉ còn thanh nổi trên màn hình.
-3. Sắp cửa sổ VS sao cho thấy cả code lẫn cửa sổ Watch, rồi bấm `Ctrl+Shift+R` khoanh vùng chụp.
-   Chỉ làm 1 lần cho cả đợt.
+3. Sắp cửa sổ VS sao cho thấy tab tên file, dòng code và cửa sổ Watch, rồi bấm `Ctrl+Shift+R` khoanh vùng chụp.
+   Chỉ làm 1 lần cho cả đợt. Nếu `settings.json` có `ClipboardWidthInches` / `ClipboardHeightInches` thì hiện
+   **khung cỡ cố định** (inch × 96 px) chạy theo chuột: đưa tới chỗ rồi click để chốt, Esc để huỷ.
+   Như vậy ảnh nào cũng cùng một cỡ, dán vào Excel không bị méo.
 
 Mỗi test case:
 
@@ -71,7 +73,8 @@ Quy tắc duy nhất khi copy: **trong 「 」 là biến, ngoài ngoặc là la
 | `Ctrl+Shift+F` | Chụp toàn màn hình, lưu PNG |
 | `Ctrl+Shift+W` | Chụp cửa sổ đang active, lưu PNG |
 
-Khi bấm `Ctrl+Shift+S`, app kiểm tra trạng thái VS trước rồi mới chụp:
+Khi bấm `Ctrl+Shift+S`, app kiểm tra trạng thái VS trước rồi mới chụp. Lúc chụp, app tạm ẩn thanh nổi và dời chuột
+ra ngoài vùng chụp (để ảnh không dính tooltip giá trị biến), chụp xong trả chuột về chỗ cũ.
 
 | Tình huống | Xử lý |
 |---|---|
