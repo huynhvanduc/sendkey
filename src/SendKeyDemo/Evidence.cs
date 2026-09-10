@@ -469,10 +469,13 @@ public sealed class EvidenceBarForm : Form
     readonly Label _dot = new() { Text = "●", AutoSize = true, Margin = new Padding(0, 1, 6, 0) };
     readonly Label _cmd = new() { AutoSize = true, Margin = new Padding(0, 4, 6, 0) };
     readonly Label _arrow = new() { Text = "→", AutoSize = true, Margin = new Padding(0, 4, 6, 0) };
-    readonly Label _target = new() { AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
+    // Không AutoSize: rộng = phần còn trống của dòng (xem Fit), chữ dài thì hiện "…".
+    readonly Label _target = new() { AutoSize = false, AutoEllipsis = true, Margin = new Padding(0, 4, 0, 0) };
     readonly TextBox _csLabel = new() { Visible = false, Margin = new Padding(0, 2, 6, 0) };
     readonly TextBox _csVar = new() { Visible = false, Margin = new Padding(0, 2, 0, 0) };
     readonly Label _reason = new() { AutoSize = true, Visible = false, Margin = new Padding(22, 3, 0, 1) };
+
+    readonly TableLayoutPanel _body;
 
     StripState _state = StripState.Idle;
     bool _labelOnly;
@@ -495,8 +498,6 @@ public sealed class EvidenceBarForm : Form
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
         AutoScaleMode = AutoScaleMode.Dpi;
-        AutoSize = true;
-        AutoSizeMode = AutoSizeMode.GrowAndShrink;
         Padding = new Padding(2);                      // chừa viền màu trạng thái
         BackColor = Theme.PanelBackground;
         DoubleBuffered = true;
@@ -523,16 +524,16 @@ public sealed class EvidenceBarForm : Form
         };
         line1.Controls.AddRange(new Control[] { _dot, _cmd, _arrow, _target, _csLabel, _csVar });
 
-        var body = new TableLayoutPanel
+        _body = new TableLayoutPanel
         {
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, Dock = DockStyle.Fill,
+            ColumnCount = 1, Dock = DockStyle.Fill,
             Padding = new Padding(10, 4, 12, 4), BackColor = Theme.PanelBackground,
         };
-        body.Controls.Add(line1, 0, 0);
-        body.Controls.Add(_reason, 0, 1);
-        Controls.Add(body);
+        _body.Controls.Add(line1, 0, 0);
+        _body.Controls.Add(_reason, 0, 1);
+        Controls.Add(_body);
 
-        foreach (var c in new Control[] { this, body, line1, _dot, _cmd, _arrow, _target, _reason })
+        foreach (var c in new Control[] { this, _body, line1, _dot, _cmd, _arrow, _target, _reason })
             c.MouseDown += DragOrOpenConfig;
 
         SetPair("", Array.Empty<string>(), "");
@@ -544,11 +545,34 @@ public sealed class EvidenceBarForm : Form
         base.OnLoad(e);
         // Đặt cỡ lúc hiện (đã biết DPI của màn hình), không dùng px cứng trong constructor.
         int w = LogicalToDeviceUnits(BarWidth);
-        MinimumSize = new Size(w, 0);
-        MaximumSize = new Size(w, 0);
-        _csLabel.Width = LogicalToDeviceUnits(180);
-        _csVar.Width = LogicalToDeviceUnits(220);
+        ClientSize = new Size(w, ClientSize.Height);
         _reason.MaximumSize = new Size(w - LogicalToDeviceUnits(50), 0);
+        Fit();
+    }
+
+    /// <summary>
+    /// Chia chiều ngang dòng 1 (ô target / 2 ô nhập ăn phần còn trống) rồi đặt chiều cao theo nội dung —
+    /// form không AutoSize vì khung Dock=Fill không báo lên khi dòng 2 bật/tắt.
+    /// </summary>
+    void Fit()
+    {
+        if (!IsHandleCreated) return;   // OnLoad sẽ gọi lại
+        int inner = ClientSize.Width - Padding.Horizontal - _body.Padding.Horizontal;
+        int used = 0;
+        foreach (var c in new Control[] { _dot, _cmd, _arrow })
+            if (c.Visible) used += c.PreferredSize.Width + c.Margin.Horizontal;
+        int room = Math.Max(LogicalToDeviceUnits(80), inner - used);
+
+        _target.Width = room - _target.Margin.Horizontal;
+        _target.Height = _target.PreferredHeight;
+        if (_labelOnly)
+            _csLabel.Width = Math.Min(room - _csLabel.Margin.Horizontal, LogicalToDeviceUnits(260));
+        else
+            _csLabel.Width = _csVar.Width =
+                Math.Min((room - _csLabel.Margin.Horizontal - _csVar.Margin.Horizontal) / 2, LogicalToDeviceUnits(220));
+
+        int h = _body.GetPreferredSize(new Size(ClientSize.Width - Padding.Horizontal, 0)).Height;
+        ClientSize = new Size(ClientSize.Width, h + Padding.Vertical);
     }
 
     // ---------------- API cho EvidenceSession ----------------
@@ -557,7 +581,7 @@ public sealed class EvidenceBarForm : Form
     public void SetPair(string cmdLabel, IReadOnlyList<string> cmdItems, string target)
     {
         var cmd = $"{cmdLabel} {string.Concat(cmdItems.Select(i => $"「{i}」"))}".Trim();
-        _cmd.Text = cmd.Length > 0 ? Clip(cmd, 60) : "Copy label trong Excel để bắt đầu";
+        _cmd.Text = cmd.Length > 0 ? Clip(cmd, 45) : "Copy label trong Excel để bắt đầu";
         _target.Text = Clip(target, 70);
         _labelOnly = false;
         _csLabel.Text = _csVar.Text = "";
@@ -587,6 +611,7 @@ public sealed class EvidenceBarForm : Form
         bool show = (state is StripState.Confirm or StripState.Block) && !string.IsNullOrWhiteSpace(reason);
         _reason.Text = show ? (state == StripState.Block ? "❌  " : "⚠  ") + reason : "";
         _reason.Visible = show;
+        Fit();          // dòng 2 bật/tắt thì đổi chiều cao
         Invalidate();   // viền đổi màu theo chấm
     }
 
@@ -619,6 +644,7 @@ public sealed class EvidenceBarForm : Form
         _csVar.Visible = visible && !_labelOnly;
         _target.Visible = !visible && _target.Text.Length > 0;
         _arrow.Visible = visible || _target.Text.Length > 0;
+        Fit();
     }
 
     void OnFieldKeyDown(object? sender, KeyEventArgs e)
