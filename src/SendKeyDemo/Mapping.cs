@@ -11,7 +11,10 @@ public enum LookupKind { NotFoundLabel, NeedPickVar, Duplicate, Ok }
 
 public enum LabelLineKind { NotFound, Multiple, NoExecutableLine, AnchorNotFound, Ok }
 
-public record LabelLineResult(LabelLineKind Kind, int Line = 0, IReadOnlyList<int>? MatchLines = null);
+public record LabelLineResult(LabelLineKind Kind, int Line = 0, IReadOnlyList<int>? MatchLines = null, int LabelLine = 0);
+
+/// <summary>Một điểm dừng khi chụp: 1 dòng code = 1 ảnh, Watch chỉ gồm các biến rơi vào dòng này.</summary>
+public record StopPoint(string File, int Line, int LabelLine, IReadOnlyList<string> Watch, IReadOnlyList<string> Items);
 
 public record LookupResult(
     LookupKind Kind,
@@ -166,12 +169,12 @@ public static class Mapping
                 if (t.StartsWith("//")) continue;
                 if (t.StartsWith("/*")) { if (!t.Contains("*/")) inBlock = true; continue; }
                 if (_ws.Replace(t, " ").Contains(aOne) || _ws.Replace(t, "").Contains(aNo))
-                    return new LabelLineResult(LabelLineKind.Ok, ln);
+                    return new LabelLineResult(LabelLineKind.Ok, ln, LabelLine: matches[0]);
             }
             return new LabelLineResult(LabelLineKind.AnchorNotFound);
         }
 
-        return new LabelLineResult(LabelLineKind.Ok, firstExec);
+        return new LabelLineResult(LabelLineKind.Ok, firstExec, LabelLine: matches[0]);
     }
 
     /// <summary>Dòng thực thi đầu tiên tại/sau dòng nhãn (1-based); 0 nếu không còn dòng nào.</summary>
@@ -259,6 +262,23 @@ public static class Mapping
                 DuplicateLines: hits.Select(r => r.SourceLine).ToList());
         return new LookupResult(LookupKind.Ok, hits[0]);
     }
+
+    /// <summary>
+    /// Gom các đích đã tra thành điểm dừng: cùng file + cùng dòng thì chung 1 ảnh. Thứ tự: file theo lần
+    /// xuất hiện đầu tiên, trong 1 file theo số dòng (thứ tự chương trình chạy qua).
+    /// </summary>
+    public static List<StopPoint> GroupStops(IReadOnlyList<(string File, int Line, int LabelLine, string Watch, string Item)> targets)
+    {
+        var fileOrder = targets.Select(t => t.File).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return targets
+            .GroupBy(t => (File: t.File.ToLowerInvariant(), t.Line))
+            .Select(g => new StopPoint(g.First().File, g.Key.Line, g.First().LabelLine,
+                g.Select(t => t.Watch).Where(w => w.Length > 0).Distinct().ToList(),
+                g.Select(t => t.Item).ToList()))
+            .OrderBy(s => fileOrder.FindIndex(f => string.Equals(f, s.File, StringComparison.OrdinalIgnoreCase)))
+            .ThenBy(s => s.Line)
+            .ToList();
+    }
 }
 
 // ==================== CopiedText ====================
@@ -332,5 +352,33 @@ public static class CopiedText
         var label = s.Trim(':', '：', ' ').Trim();
         if (label.Length == 0 || label.Length > MaxLabelLength) return null;
         return new Piece(false, label);
+    }
+
+    static readonly Regex _goto = new(@"^goto\s*:?\s*([^\s:]+)\s*$", RegexOptions.IgnoreCase);
+    static readonly Regex _batchVar = new(@"%[^%\s]+%|![^!\s]+!|^(if|goto)\s", RegexOptions.IgnoreCase);
+
+    /// <summary>「goto :END_PROC」 → "END_PROC"; không phải lệnh goto → null.</summary>
+    public static string? GotoTarget(string? inner)
+    {
+        var m = _goto.Match((inner ?? "").Trim());
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    /// <summary>
+    /// Mọi mẩu trong 1 lần copy. Có 「 」 → mỗi cặp là 1 biến/mệnh đề; nhiều cặp thì chỉ giữ cặp trông như
+    /// biến batch (%X%, !X!, if…, goto…) để 「0」 trong "「%RC%」が「0」であること" không bị coi là biến.
+    /// Không có ngoặc → 1 label như <see cref="Classify"/>.
+    /// </summary>
+    public static List<Piece> ClassifyAll(string? raw)
+    {
+        var s = Normalize(UnquoteExcel(raw));
+        var inners = _bracket.Matches(s).Select(m => m.Groups[1].Value.Trim()).Where(v => v.Length > 0).ToList();
+        if (inners.Count > 1)
+        {
+            var vars = inners.Where(v => _batchVar.IsMatch(v)).ToList();
+            inners = vars.Count > 0 ? vars : inners.Take(1).ToList();
+        }
+        if (inners.Count > 0) return inners.Select(v => new Piece(true, v)).ToList();
+        return Classify(raw) is { } p ? new List<Piece> { p } : new List<Piece>();
     }
 }

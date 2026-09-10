@@ -6,9 +6,10 @@ using System.Runtime.InteropServices;
 namespace SendKeyDemo;
 
 /// <summary>
-/// Một đợt chụp bằng chứng. Nghe clipboard để bắt cặp label / 「biến」 copy từ file test case,
-/// hiện cặp C# tương ứng (chưa có thì cho gõ tay rồi ghi vào mapping.csv), bám sự kiện VS dừng
-/// để tự chấm, và gác cổng phím chụp — sai thao tác cơ học thì KHÔNG cho ra ảnh.
+/// Một đợt chụp bằng chứng. Nghe clipboard để gom label + các 「」 copy từ file test case, tra mapping.csv
+/// (chưa có thì hỏi C# ngay trên thanh rồi ghi thêm), đặt breakpoint cho từng dòng cần chụp, tự điền Watch
+/// khi VS dừng, và gác cổng phím chụp — sai thao tác cơ học thì KHÔNG cho ra ảnh.
+/// Mỗi dòng dừng = 1 ảnh; Watch mỗi lần chỉ gồm biến của dòng đó.
 /// </summary>
 public sealed class EvidenceSession : IDisposable
 {
@@ -20,30 +21,35 @@ public sealed class EvidenceSession : IDisposable
     VsAutomation.BreakWatcher? _watcher;     // phải giữ field, xem chú thích trong BreakWatcher
     LastCapture? _last;
     bool _active;
-    int _shotCount;
 
+    // Nhóm đang chụp: label + nội dung các 「」 đã copy, theo thứ tự.
     string _cmdLabel = "";
-    string _cmdVar = "";
+    readonly List<string> _items = new();
+    string? _askingItem;                     // 「」 đang chờ gõ C# trên thanh
 
-    // Đích đã tra được — dùng để đối chiếu với chỗ VS thật sự dừng.
-    string _targetFile = "";
-    int _targetLine;
-    string _watchExpr = "";
+    // Sau G: các dòng cần chụp (đã đặt breakpoint), dòng nào chụp xong, dòng VS đang dừng.
+    List<StopPoint> _stops = new();
+    readonly HashSet<int> _done = new();
+    int _currentStop = -1;
+    List<string> _bpFiles = new();
+    string? _confirmed;                      // lý do ⚠ đã báo — bấm chụp lần nữa mới ra ảnh
+    IntPtr _sourceWindow;                    // cửa sổ lúc copy (Excel) — chụp xong đưa lên lại
+
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
 
     public EvidenceSession(MainForm host, AppSettings settings)
     {
         _host = host;
         _settings = settings;
-        _bar.RunRequested += Run;
+        _bar.InputSubmitted += OnInputSubmitted;
     }
 
     public bool Active => _active;
     public EvidenceBarForm Bar => _bar;
 
-    string Progress => $"{_shotCount} ảnh";
-
-    /// <summary>Tên cặp đang chụp, chỉ để ghi vào thông báo — vd "CHECK_INPUT/%RC%".</summary>
-    string TcId => _cmdVar.Length > 0 ? $"{_cmdLabel}/{_cmdVar}" : _cmdLabel;
+    /// <summary>Tên nhóm đang chụp, chỉ để ghi vào thông báo — vd "CHECK_INPUT「%RC%」「%TAX%」".</summary>
+    string TcId => _cmdLabel + string.Concat(_items.Select(i => $"「{i}」"));
 
     // ---------------- vòng đời ----------------
 
@@ -52,7 +58,6 @@ public sealed class EvidenceSession : IDisposable
     {
         Stop(keepBar: true);
         _active = true;
-        _shotCount = 0;
 
         _bar.PlaceAt(_settings.StripX, _settings.StripY);
         _bar.Show();
@@ -61,10 +66,11 @@ public sealed class EvidenceSession : IDisposable
 
         _clip = new ClipboardWatcher();
         _clip.TextCopied += OnCopied;
-        _cmdLabel = _cmdVar = "";
-        _bar.SetCmd("", "");
-        _bar.SetCs("", "");
-        SetStatus(StripState.Pending, "Copy label trong file test case (Excel) để bắt đầu.");
+        _cmdLabel = "";
+        _items.Clear();
+        ResetStops();
+        _bar.SetPair("", _items, "");
+        _bar.SetStatus(StripState.Idle, null);
         _host.Log("Chụp bằng chứng: bắt đầu — copy label rồi 「biến」 từ Excel.");
     }
 
@@ -125,282 +131,302 @@ public sealed class EvidenceSession : IDisposable
     {
         if (!_active) return;
 
-        // Quy tắc duy nhất: trong 「 」 là biến/mệnh đề, ngoài ngoặc là label.
-        if (CopiedText.Classify(raw) is not { } piece) return;
+        // Quy tắc duy nhất: trong 「 」 là biến/mệnh đề (1 ô có thể nhiều cặp), ngoài ngoặc là label.
+        var pieces = CopiedText.ClassifyAll(raw);
+        if (pieces.Count == 0) return;
+        _sourceWindow = GetForegroundWindow();
 
-        if (piece.IsVar) _cmdVar = piece.Value;
-        else { _cmdLabel = piece.Value; _cmdVar = ""; }
+        // Label mới, hoặc nhóm trước đã chụp đủ → bắt đầu nhóm mới.
+        if (!pieces[0].IsVar) { _cmdLabel = pieces[0].Value; _items.Clear(); }
+        else if (_stops.Count > 0 && _done.Count == _stops.Count) _items.Clear();
 
-        Prefill();
+        foreach (var p in pieces.Where(p => p.IsVar))
+            if (!_items.Contains(p.Value, StringComparer.OrdinalIgnoreCase)) _items.Add(p.Value);
+
+        ResetStops();
+        Resolve(ask: false);   // chỉ báo; không cướp focus khỏi Excel lúc dev còn đang copy
     }
 
-    /// <summary>Tra mapping.csv để điền sẵn cặp C#; chưa có thì để trống cho người dùng gõ.</summary>
-    void Prefill()
+    /// <summary>
+    /// Tra mọi 「」 trong nhóm ra các dòng cần chụp. Có cái chưa có trong mapping.csv thì báo vàng — và nếu
+    /// <paramref name="ask"/> thì mở ô gõ C# ngay trên thanh. Lỗi khác báo đỏ. Không tra đủ → null.
+    /// </summary>
+    List<StopPoint>? Resolve(bool ask)
     {
-        _bar.SetCmd(_cmdLabel, _cmdVar);
-        _targetLine = 0;
+        _bar.SetPair(_cmdLabel, _items, "");
+        if (_items.Count == 0) { _bar.SetStatus(StripState.Idle, null); return null; }
 
         var rows = _host.GetMapRows();
-        if (rows == null)
+        if (rows == null) return Fail("Chưa nạp được mapping.csv — kiểm tra đường dẫn ở cửa sổ cấu hình.");
+
+        var targets = new List<(string File, int Line, int LabelLine, string Watch, string Item)>();
+        foreach (var item in _items)
         {
-            _bar.SetCs("", "");
-            SetStatus(StripState.Block, "Chưa nạp được mapping.csv — kiểm tra đường dẫn ở cửa sổ cấu hình.");
-            return;
+            // 「goto :X」 → dừng ở dòng đầu label X, không cần Watch; còn lại tra theo label vừa copy.
+            var gotoLabel = CopiedText.GotoTarget(item);
+            var label = gotoLabel ?? _cmdLabel;
+            if (label.Length == 0) return Fail($"Chưa copy label cho 「{item}」.");
+
+            var res = Mapping.Resolve(rows, label, gotoLabel == null ? item : null);
+            if (res.Kind == LookupKind.Duplicate)
+                return Fail($"mapping.csv trùng ở dòng {string.Join(", ", res.DuplicateLines!)} — sửa file rồi thử lại.");
+            if (res.Row is not { } row)
+            {
+                var known = rows.FirstOrDefault(r => Mapping.NormalizeLabel(r.CmdLabel) == Mapping.NormalizeLabel(label));
+                if (ask)
+                {
+                    _askingItem = item;
+                    _bar.AskInput(gotoLabel != null, item, known?.CsharpLabel ?? "", "");
+                }
+                _bar.SetStatus(StripState.Confirm, ask
+                    ? $"「{item}」 chưa có trong mapping.csv — gõ C# rồi Enter."
+                    : $"「{item}」 chưa có trong mapping.csv — bấm {_settings.GotoCurrentHotkey} để gõ C#.");
+                return null;
+            }
+
+            var csp = _host.EffectiveCsPath(row);
+            if (string.IsNullOrWhiteSpace(csp) || !File.Exists(csp)) return Fail($"Không thấy file .cs: {csp}");
+
+            var watch = gotoLabel == null ? row.CsharpVar : "";
+            var ll = Mapping.FindLabelLine(csp, row.CsharpLabel, watch);
+            if (ll.Kind != LabelLineKind.Ok)
+                return Fail(ll.Kind switch
+                {
+                    LabelLineKind.NotFound => $"Không thấy \"{row.CsharpLabel}:\" trong {Path.GetFileName(csp)}.",
+                    LabelLineKind.Multiple => $"\"{row.CsharpLabel}:\" xuất hiện ở dòng {string.Join(", ", ll.MatchLines!)}.",
+                    LabelLineKind.NoExecutableLine => $"Sau \"{row.CsharpLabel}:\" không còn dòng thực thi.",
+                    _ => $"Không thấy biểu thức \"{watch}\" sau \"{row.CsharpLabel}:\".",
+                });
+            targets.Add((csp, ll.Line, ll.LabelLine, watch, item));
         }
 
-        if (_cmdLabel.Length == 0) { _bar.SetCs("", ""); return; }
-
-        var label = Mapping.NormalizeLabel(_cmdLabel);
-        var sameLabel = rows.Where(r => Mapping.NormalizeLabel(r.CmdLabel) == label).ToList();
-
-        if (_cmdVar.Length == 0)
-        {
-            // Mới copy label, chưa copy 「 」 — chỉ hiện csharpLabel để đối chiếu.
-            _bar.SetCs(sameLabel.Count > 0 ? sameLabel[0].CsharpLabel : "", "");
-            SetStatus(StripState.Pending, sameLabel.Count > 0
-                ? $"Label đã có trong mapping. Copy tiếp phần trong 「 」."
-                : $"Label \"{_cmdLabel}\" chưa có trong mapping. Copy tiếp 「 」 rồi điền cặp C#.");
-            return;
-        }
-
-        var res = Mapping.Resolve(rows, _cmdLabel, _cmdVar);
-        switch (res.Kind)
-        {
-            case LookupKind.Ok:
-                _bar.SetCs(res.Row!.CsharpLabel, res.Row.CsharpVar);
-                SetStatus(StripState.Pending, $"Đã có trong mapping — bấm {_settings.GotoCurrentHotkey} để đặt breakpoint.");
-                break;
-
-            case LookupKind.Duplicate:
-                _bar.SetCs("", "");
-                SetStatus(StripState.Block,
-                    $"mapping.csv trùng ở dòng {string.Join(", ", res.DuplicateLines!)} — sửa file rồi thử lại.");
-                break;
-
-            case LookupKind.NeedPickVar:
-                // Label đã biết, biến thì chưa: điền sẵn csharpLabel, để trống csharpVar cho người dùng gõ.
-                _bar.SetCs(sameLabel.Count > 0 ? sameLabel[0].CsharpLabel : "", "");
-                SetStatus(StripState.Confirm,
-                    $"Biến \"{_cmdVar}\" chưa có — gõ csharpVar rồi Enter (sẽ ghi thêm vào mapping.csv).");
-                break;
-
-            default:   // NotFoundLabel
-                _bar.SetCs("", "");
-                SetStatus(StripState.Confirm,
-                    $"Chưa có trong mapping — gõ csharpLabel + csharpVar rồi Enter (sẽ ghi thêm vào mapping.csv).");
-                break;
-        }
+        var stops = Mapping.GroupStops(targets);
+        _bar.SetPair(_cmdLabel, _items, TargetText(stops, 0));
+        _bar.SetStatus(StripState.Pending, null);
+        return stops;
     }
 
-    // ---------------- chạy: ghi mapping nếu cần, rồi đặt breakpoint ----------------
+    /// <summary>Enter trong ô C# trên thanh: kiểm với code, ghi thêm dòng vào mapping.csv rồi chạy luôn như G.</summary>
+    void OnInputSubmitted(string csLabel, string csVar)
+    {
+        if (!_active || _askingItem is not { } item) return;
 
-    /// <summary>Enter trong thanh, nút ⏎ Chạy, hoặc hotkey GotoCurrent.</summary>
+        var gotoLabel = CopiedText.GotoTarget(item);
+        var err = gotoLabel != null
+            ? _host.AddMapping(gotoLabel, "", csLabel, "")
+            : _host.AddMapping(_cmdLabel, item, csLabel, csVar);
+        if (err != null)
+        {
+            _bar.SetStatus(StripState.Block, err);   // ô nhập vẫn mở để sửa rồi Enter lại
+            Beep(StripState.Block);
+            return;
+        }
+
+        _askingItem = null;
+        Run();
+    }
+
+    // ---------------- G: đặt breakpoint ----------------
+
+    /// <summary>Hotkey G, hoặc Enter sau khi gõ C#: đặt breakpoint cho mọi dòng cần chụp, mở đúng tab, đưa VS lên.</summary>
     public void Run()
     {
         if (!_active) return;
-
-        if (_cmdLabel.Length == 0)
-        {
-            SetStatus(StripState.Block, "Chưa copy label từ file test case.");
-            Beep(StripState.Block);
-            return;
-        }
-
-        var csLabel = _bar.CsLabel;
-        var csVar = _bar.CsVar;
-        if (csLabel.Length == 0 || csVar.Length == 0)
-        {
-            SetStatus(StripState.Confirm, "Điền nốt csharpLabel / csharpVar rồi Enter.");
-            _bar.FocusFirstEmptyCs();
-            Beep(StripState.Confirm);
-            return;
-        }
-
-        var rows = _host.GetMapRows();
-        if (rows == null) { SetStatus(StripState.Block, "Chưa nạp được mapping.csv."); Beep(StripState.Block); return; }
-
-        var cmdVarForLookup = _cmdVar.Length > 0 ? _cmdVar : null;
-        var res = Mapping.Resolve(rows, _cmdLabel, cmdVarForLookup);
-
-        if (res.Kind is LookupKind.NotFoundLabel or LookupKind.NeedPickVar)
-        {
-            var err = _host.AddMapping(_cmdLabel, _cmdVar, csLabel, csVar);
-            if (err != null)
-            {
-                SetStatus(StripState.Block, err);
-                _bar.FocusFirstEmptyCs();
-                Beep(StripState.Block);
-                return;
-            }
-            rows = _host.GetMapRows();
-            if (rows == null) { SetStatus(StripState.Block, "Chưa nạp lại được mapping.csv."); return; }
-            res = Mapping.Resolve(rows, _cmdLabel, cmdVarForLookup);
-        }
-
-        if (res.Kind != LookupKind.Ok || res.Row is not { } row)
-        {
-            SetStatus(StripState.Block, res.Kind == LookupKind.Duplicate
-                ? $"mapping.csv trùng ở dòng {string.Join(", ", res.DuplicateLines!)}."
-                : "Tra mapping không ra sau khi ghi — kiểm tra mapping.csv.");
-            Beep(StripState.Block);
-            return;
-        }
-
-        // Người dùng sửa ô C# nhưng cặp cmd đã có sẵn dòng khác -> dùng dòng trong file, báo cho biết.
-        if (row.CsharpLabel != csLabel || row.CsharpVar != csVar)
-        {
-            _bar.SetCs(row.CsharpLabel, row.CsharpVar);
-            _host.Log($"Chụp: cặp này đã có trong mapping.csv ({row.CsharpLabel}/{row.CsharpVar}) — " +
-                      "dùng dòng có sẵn. Muốn đổi thì sửa thẳng mapping.csv.");
-        }
-
-        var csp = _host.EffectiveCsPath(row);
-        if (string.IsNullOrWhiteSpace(csp) || !File.Exists(csp))
-        {
-            SetStatus(StripState.Block, $"Không thấy file .cs: {csp}");
-            Beep(StripState.Block);
-            return;
-        }
-
-        var ll = Mapping.FindLabelLine(csp, row.CsharpLabel, row.CsharpVar);
-        if (ll.Kind != LabelLineKind.Ok)
-        {
-            SetStatus(StripState.Block, ll.Kind switch
-            {
-                LabelLineKind.NotFound => $"Không thấy \"{row.CsharpLabel}:\" trong {Path.GetFileName(csp)}.",
-                LabelLineKind.Multiple => $"\"{row.CsharpLabel}:\" xuất hiện ở dòng {string.Join(", ", ll.MatchLines!)}.",
-                LabelLineKind.NoExecutableLine => $"Sau \"{row.CsharpLabel}:\" không còn dòng thực thi.",
-                _ => $"Không thấy biểu thức \"{row.CsharpVar}\" sau \"{row.CsharpLabel}:\".",
-            });
-            Beep(StripState.Block);
-            return;
-        }
-
-        _targetFile = csp;
-        _targetLine = ll.Line;
-        _watchExpr = row.CsharpVar;
-
-        // Lỗ hổng âm thầm: định danh thuần thì breakpoint rơi vào dòng đầu sau label bất kể
-        // biến gán ở đâu -> giá trị có thể chưa được gán tại dòng này.
-        if (!Mapping.IsExpression(_watchExpr) && LineMentions(csp, ll.Line, _watchExpr) == false)
-            _host.Log($"Chụp: ⚠ dòng {Path.GetFileName(csp)}:{ll.Line} không nhắc tới \"{_watchExpr}\" — " +
-                      "giá trị có thể chưa được gán ở đây.");
-
-        if (_host.CurrentDte() is not { } dte)
-        {
-            SetStatus(StripState.Block, "Chưa chọn instance VS — mở cửa sổ cấu hình bấm Refresh.");
-            Beep(StripState.Block);
-            return;
-        }
+        if (_items.Count == 0) { Block("Chưa copy 「…」 từ file test case."); return; }
+        if (Resolve(ask: true) is not { } stops) { Beep(StripState.Block); return; }
+        if (_host.CurrentDte() is not { } dte) { Block("Chưa chọn instance VS — mở cửa sổ cấu hình bấm Refresh."); return; }
 
         try
         {
-            _host.Log("Chụp: " + VsAutomation.SetOnlyBreakpoint(dte, csp, ll.Line));
-            _host.Log("Chụp: " + VsAutomation.GoToLine(dte, csp, ll.Line));
-            if (_clip != null) _clip.IgnoreText = _watchExpr;   // đừng tự nhận lại biểu thức mình vừa copy
-            try { Clipboard.SetText(_watchExpr); } catch { /* clipboard bận */ }
+            // Xoá breakpoint cũ ở mọi file đã đụng tới rồi đặt đúng 1 breakpoint cho mỗi dòng cần chụp.
+            foreach (var f in _bpFiles.Concat(stops.Select(s => s.File)).Distinct(StringComparer.OrdinalIgnoreCase).ToList())
+                VsAutomation.ClearBreakpointsInFile(dte, f);
+            foreach (var s in stops)
+                _host.Log("Chụp: " + VsAutomation.EnsureBreakpoint(dte, s.File, s.Line));
+            VsAutomation.ShowLabel(dte, stops[0].File, stops[0].LabelLine, stops[0].Line);
         }
-        catch (Exception ex)
-        {
-            SetStatus(StripState.Block, "Lỗi thao tác VS: " + ex.Message);
-            Beep(StripState.Block);
-            return;
-        }
+        catch (Exception ex) { Block("Lỗi thao tác VS: " + ex.Message); return; }
 
-        SetStatus(StripState.Pending,
-            $"▶ {Path.GetFileName(csp)}:{ll.Line} · F5 → dừng → Ctrl+V vào Watch");
+        ResetStops();
+        _stops = stops;
+        _bpFiles = stops.Select(s => s.File).ToList();
+
+        // Định danh thuần thì breakpoint rơi vào dòng đầu sau label — giá trị có thể chưa được gán ở đó.
+        foreach (var s in stops)
+            foreach (var w in s.Watch.Where(w => !Mapping.IsExpression(w) && LineMentions(s.File, s.Line, w) == false))
+                _host.Log($"Chụp: ⚠ dòng {Path.GetFileName(s.File)}:{s.Line} không nhắc tới \"{w}\" — " +
+                          "giá trị có thể chưa được gán ở đây.");
+
+        _bar.SetPair(_cmdLabel, _items, TargetText(stops, 0));
+        _bar.SetStatus(StripState.Pending, null);
     }
 
     // ---------------- chấm + chụp ----------------
 
-    public CheckResult? Recheck(bool fromEvent = false)
+    /// <summary>
+    /// Chấm trạng thái VS. Lúc VS vừa dừng đúng 1 dòng cần chụp (<paramref name="fromEvent"/>) hoặc lúc bấm
+    /// chụp (<paramref name="refresh"/>) thì đặt lại Watch = đúng biến của dòng đó — không dư biến lần trước,
+    /// không thiếu, và VS phải tính lại giá trị — rồi cuộn cho label hiện ra.
+    /// </summary>
+    public CheckResult? Recheck(bool fromEvent = false, bool refresh = false)
     {
-        if (!_active || _targetLine == 0) return null;
+        if (!_active || _stops.Count == 0) return null;
 
         if (_host.CurrentDte() is not { } dte)
         {
-            SetStatus(StripState.Block, "Chưa chọn instance VS.");
+            _bar.SetStatus(StripState.Block, "Chưa chọn instance VS.");
             return new CheckResult(CheckLevel.Block, "Chưa chọn instance VS.");
         }
 
-        var snap = VsAutomation.ReadDebugState(dte, _targetFile, _watchExpr);
-        var result = CaptureCheck.Evaluate(snap, TcId, _targetFile, _targetLine, _watchExpr, _last);
+        var hit = VsAutomation.ReadDebugState(dte, "", Array.Empty<string>());
+        if (fromEvent && !hit.InBreakMode) return null;   // chưa tới lúc, im lặng
 
-        if (fromEvent && !snap.InBreakMode) return result;   // chưa tới lúc, im lặng
+        // Đang dừng ở dòng nào trong nhóm; không khớp dòng nào thì so với dòng chưa chụp đầu tiên để báo sai dòng.
+        _currentStop = Enumerable.Range(0, _stops.Count).FirstOrDefault(i => !_done.Contains(i) && IsAt(_stops[i], hit), -1);
+        var stop = _stops[_currentStop >= 0 ? _currentStop : NextStop()];
 
-        SetStatus(LevelToState(result.Level), Prefix(result.Level) + result.Message);
+        string note = "";
+        bool labelShown = true;
+        if (_currentStop >= 0 && (fromEvent || refresh))
+        {
+            try
+            {
+                var missed = VsAutomation.SetWatch(dte, stop.File, stop.LabelLine, stop.Watch);
+                if (missed is not { Count: 0 })
+                {
+                    var manual = missed ?? stop.Watch.ToList();
+                    CopyForManualWatch(manual);
+                    if (manual.Count > 0) note = $" Đã copy {string.Join(", ", manual)} — Ctrl+V vào Watch.";
+                }
+                labelShown = VsAutomation.ShowLabel(dte, stop.File, stop.LabelLine, stop.Line);
+            }
+            catch (Exception ex) { note = " Lỗi điền Watch: " + ex.Message; }
+        }
+
+        var snap = VsAutomation.ReadDebugState(dte, stop.File, stop.Watch);
+        var result = CaptureCheck.Evaluate(snap, TcId, stop.File, stop.Line, string.Join("; ", stop.Watch), _last);
+
+        // Watch phải có đúng biến của dòng này — lý do bị review trả ảnh nhiều nhất.
+        if (result.Level != CheckLevel.Block && VsAutomation.ReadWatchNames(dte) is { } names &&
+            CaptureCheck.WatchMismatch(names, stop.Watch) is { } mismatch)
+            result = new CheckResult(CheckLevel.Block, mismatch + note);
+        else if (result.Level == CheckLevel.Ok && !labelShown)
+            result = new CheckResult(CheckLevel.Confirm,
+                $"Không thấy dòng label (dòng {stop.LabelLine}) trong editor — nới cửa sổ code để ảnh thấy label.");
+
+        _bar.SetPair(_cmdLabel, _items, TargetText(_stops, _stops.IndexOf(stop)));
+        _bar.SetStatus(LevelToState(result.Level), result.Level == CheckLevel.Ok ? null : result.Message);
         if (fromEvent) Beep(LevelToState(result.Level));
         return result;
     }
 
-    /// <summary>Phím chụp: chấm trước, đỏ thì không ra ảnh.</summary>
+    /// <summary>Phím chụp: làm mới Watch rồi chấm; đỏ thì không ra ảnh, vàng thì bấm lần nữa mới chụp.</summary>
     public void CaptureCurrent()
     {
         if (!_active) return;
 
-        if (_targetLine == 0)
-        {
-            SetStatus(StripState.Block, $"Chưa đặt breakpoint — bấm {_settings.GotoCurrentHotkey} trước.");
-            Beep(StripState.Block);
-            return;
-        }
+        if (_stops.Count == 0) { Block($"Chưa đặt breakpoint — bấm {_settings.GotoCurrentHotkey} trước."); return; }
+        if (_host.SavedRegion is not { } region) { Block($"Chưa khoanh vùng chụp — bấm {_settings.DefineRegionHotkey} một lần."); return; }
 
-        if (_host.SavedRegion is not { } region)
-        {
-            SetStatus(StripState.Block, $"Chưa khoanh vùng chụp — bấm {_settings.DefineRegionHotkey} một lần.");
-            Beep(StripState.Block);
-            return;
-        }
-
-        var tcId = TcId;
-        var result = Recheck();
+        var result = Recheck(refresh: true);
         if (result == null) return;
 
-        if (result.Level == CheckLevel.Block)
+        if (result.Level == CheckLevel.Block || _currentStop < 0)
         {
             Beep(StripState.Block);
             _host.Log("Chụp BỊ CHẶN: " + result.Message);
             return;
         }
 
-        if (result.Level == CheckLevel.Confirm)
+        if (result.Level == CheckLevel.Confirm && _confirmed != result.Message)
         {
+            _confirmed = result.Message;
+            _bar.SetStatus(StripState.Confirm, $"{result.Message} Bấm {_settings.CaptureRegionHotkey} lần nữa để vẫn chụp.");
             Beep(StripState.Confirm);
-            var answer = MessageBox.Show(_bar, result.Message, "Xác nhận chụp",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
-            if (answer != DialogResult.Yes)
-            {
-                SetStatus(StripState.Confirm, "Đã hủy chụp — " + result.Message);
-                _host.Log("Chụp: người dùng hủy — " + result.Message);
-                return;
-            }
+            return;
         }
+        _confirmed = null;
 
         // Không lưu PNG: ảnh vào thẳng clipboard để dán vào tài liệu bằng chứng.
         // Ẩn thanh nổi + dời chuột ra ngoài vùng trước khi chụp để ảnh không dính thanh / tooltip.
         var shot = ScreenCapture.GrabClean(region, _settings, _bar);
         if (!shot.Ok)
         {
-            SetStatus(StripState.Block, shot.Message);
-            Beep(StripState.Block);
+            Block(shot.Message);
             _host.Log("Chụp: " + shot.Message);
             return;
         }
 
+        var stop = _stops[_currentStop];
         if (_host.CurrentDte() is { } dteNow)
         {
-            var snapNow = VsAutomation.ReadDebugState(dteNow, _targetFile, _watchExpr);
-            _last = new LastCapture(snapNow.ProcessId, tcId, _watchExpr, snapNow.ExprValue);
+            var snapNow = VsAutomation.ReadDebugState(dteNow, stop.File, stop.Watch);
+            _last = new LastCapture(snapNow.ProcessId, TcId, string.Join("; ", stop.Watch), snapNow.ExprValue);
         }
-
-        _shotCount++;
-        _host.Log($"Chụp XONG {tcId} → clipboard (Ctrl+V để dán). {Progress}");
+        _done.Add(_currentStop);
         Beep(StripState.Ok);
+        _host.Log($"Chụp XONG {TcId} · {Path.GetFileName(stop.File)}:{stop.Line} → clipboard (Ctrl+V để dán).");
 
-        SetStatus(StripState.Ok, "✓ Đã chụp — Ctrl+V để dán. Copy cặp tiếp theo từ Excel.");
+        bool all = _done.Count == _stops.Count;
+        _bar.SetPair(_cmdLabel, _items, all ? $"✓ đủ {_stops.Count} ảnh — copy test case tiếp" : TargetText(_stops, NextStop()));
+        _bar.SetStatus(all ? StripState.Ok : StripState.Pending, null);
+
+        // Đưa lại cửa sổ vừa copy (Excel) để Ctrl+V luôn.
+        if (_sourceWindow != IntPtr.Zero) SetForegroundWindow(_sourceWindow);
     }
 
     // ---------------- trợ giúp ----------------
+
+    /// <summary>Phần sau mũi tên trên thanh, vd "rc, tax · Program.cs:42 · 1/2".</summary>
+    static string TargetText(IReadOnlyList<StopPoint> stops, int index)
+    {
+        if (stops.Count == 0) return "";
+        int i = Math.Clamp(index, 0, stops.Count - 1);
+        var s = stops[i];
+        var what = s.Watch.Count > 0 ? string.Join(", ", s.Watch) : "goto";
+        return $"{what} · {Path.GetFileName(s.File)}:{s.Line}" + (stops.Count > 1 ? $" · {i + 1}/{stops.Count}" : "");
+    }
+
+    void ResetStops()
+    {
+        _stops = new();
+        _done.Clear();
+        _currentStop = -1;
+        _confirmed = null;
+        _askingItem = null;
+    }
+
+    int NextStop()
+    {
+        for (int i = 0; i < _stops.Count; i++)
+            if (!_done.Contains(i)) return i;
+        return Math.Max(0, _stops.Count - 1);
+    }
+
+    static bool IsAt(StopPoint s, DebugSnapshot hit)
+        => hit.HitLine == s.Line && hit.HitFile.Length > 0 &&
+           string.Equals(Path.GetFullPath(hit.HitFile), Path.GetFullPath(s.File), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Không tự điền được Watch: để sẵn biểu thức trong clipboard cho dev dán tay.</summary>
+    void CopyForManualWatch(IReadOnlyList<string> exprs)
+    {
+        if (exprs.Count == 0) return;
+        var text = string.Join(Environment.NewLine, exprs);
+        if (_clip != null) _clip.IgnoreText = text;   // đừng tự nhận lại biểu thức mình vừa copy
+        try { Clipboard.SetText(text); } catch { /* clipboard bận */ }
+    }
+
+    List<StopPoint>? Fail(string reason)
+    {
+        _bar.SetStatus(StripState.Block, reason);
+        return null;
+    }
+
+    void Block(string reason)
+    {
+        _bar.SetStatus(StripState.Block, reason);
+        Beep(StripState.Block);
+    }
 
     static bool? LineMentions(string file, int line, string ident)
     {
@@ -419,15 +445,6 @@ public sealed class EvidenceSession : IDisposable
         CheckLevel.Confirm => StripState.Confirm,
         _ => StripState.Block,
     };
-
-    static string Prefix(CheckLevel level) => level switch
-    {
-        CheckLevel.Ok => "✅ ",
-        CheckLevel.Confirm => "⚠ ",
-        _ => "❌ ",
-    };
-
-    void SetStatus(StripState state, string text) => _bar.SetStatus(state, text, Progress);
 
     // Phản hồi bằng âm thanh: mắt dev đang ở VS hoặc Excel, không ở thanh này.
     static void Beep(StripState state)
@@ -482,7 +499,6 @@ public sealed class EvidenceBarForm : Form
 
     /// <summary>Enter trong ô nhập: (csharpLabel, csharpVar); ca goto thì csharpVar = "".</summary>
     public event Action<string, string>? InputSubmitted;
-    public event Action? RunRequested;
     public event Action? OpenConfigRequested;
 
     protected override bool ShowWithoutActivation => true;
@@ -651,8 +667,7 @@ public sealed class EvidenceBarForm : Form
     {
         if (e.KeyCode is not (Keys.Enter or Keys.Return)) return;
         e.SuppressKeyPress = true;
-        if (InputSubmitted != null) InputSubmitted(_csLabel.Text.Trim(), _labelOnly ? "" : _csVar.Text.Trim());
-        else RunRequested?.Invoke();   // TẠM: EvidenceSession hiện tại vẫn nghe RunRequested + đọc CsLabel/CsVar
+        InputSubmitted?.Invoke(_csLabel.Text.Trim(), _labelOnly ? "" : _csVar.Text.Trim());
     }
 
     // Kéo thanh ở bất kỳ chỗ nào (trừ ô nhập); double-click = mở cửa sổ cấu hình.
@@ -681,54 +696,6 @@ public sealed class EvidenceBarForm : Form
         base.OnPaint(e);
         using var pen = new Pen(DotColor, 2f);
         e.Graphics.DrawRectangle(pen, 1, 1, ClientSize.Width - 2, ClientSize.Height - 2);
-    }
-
-    // ---------------- TẠM: API cũ mà EvidenceSession hiện tại còn gọi ----------------
-    // sendkey-4d chuyển EvidenceSession sang SetPair / AskInput / SetStatus(state, reason) xong thì xoá cả khối này.
-
-    string _oldLabel = "", _oldVar = "";
-
-    public string CsLabel => _csLabel.Text.Trim();
-    public string CsVar => _csVar.Text.Trim();
-
-    public void SetCmd(string cmdLabel, string? cmdVar)
-    {
-        _oldLabel = cmdLabel;
-        if (cmdVar != null) _oldVar = cmdVar;
-        SetPair(_oldLabel, _oldVar.Length > 0 ? new[] { _oldVar } : Array.Empty<string>(), "");
-    }
-
-    public void SetCs(string csLabel, string csVar)
-    {
-        FillInput(false, _oldVar, csLabel, csVar);
-        if (csLabel.Length > 0 && csVar.Length > 0)
-        {
-            _target.Text = Clip($"{csLabel} / {csVar}", 70);
-            SetInputVisible(false);            // giữ chữ trong ô (ẩn) vì Run() cũ đọc CsLabel/CsVar
-        }
-        else if (_oldLabel.Length > 0)
-            SetInputVisible(true);
-    }
-
-    public void FocusFirstEmptyCs()
-    {
-        if (!_csLabel.Visible) return;
-        var box = _csLabel.Text.Trim().Length == 0 ? _csLabel
-                : _csVar.Visible && _csVar.Text.Trim().Length == 0 ? _csVar
-                : null;
-        if (box == null) return;
-        Activate();
-        box.Focus();
-        box.SelectionStart = box.TextLength;
-    }
-
-    public void SetStatus(StripState state, string text, string progress)
-    {
-        SetStatus(state, text);
-        if (state is StripState.Confirm or StripState.Block) return;
-        // Trạng thái bình thường: hiện câu hướng dẫn cũ ở chỗ đích để bản chuyển tiếp vẫn đọc được.
-        _target.Text = Clip(progress.Length > 0 ? $"{text} · {progress}" : text, 90);
-        SetInputVisible(_csLabel.Visible);
     }
 }
 

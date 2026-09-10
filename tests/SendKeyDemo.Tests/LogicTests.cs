@@ -565,6 +565,103 @@ public class CopiedTextTests
     }
 }
 
+// ==================== CopyGroupTests ====================
+
+public class CopyGroupTests
+{
+    [Fact]
+    public void ClassifyAll_takes_every_batch_variable_in_one_cell()
+    {
+        var ps = CopiedText.ClassifyAll("「%RC%」と「％ＴＡＸ％」を確認");
+        Assert.Equal(new[] { "%RC%", "%TAX%" }, ps.Select(p => p.Value));
+        Assert.All(ps, p => Assert.True(p.IsVar));
+    }
+
+    [Fact]
+    public void ClassifyAll_skips_expected_value_brackets()
+        => Assert.Equal(new[] { "%RC%" }, CopiedText.ClassifyAll("「%RC%」が「0」であること").Select(p => p.Value));
+
+    [Fact]
+    public void ClassifyAll_keeps_first_when_nothing_looks_like_a_variable()
+        => Assert.Equal(new[] { "rc" }, CopiedText.ClassifyAll("「rc」が「0」").Select(p => p.Value));
+
+    [Fact]
+    public void ClassifyAll_single_bracket_or_label_same_as_Classify()
+    {
+        Assert.Equal("rc != 0", Assert.Single(CopiedText.ClassifyAll("『rc != 0』")).Value);
+        var label = Assert.Single(CopiedText.ClassifyAll(":CHECK_INPUT"));
+        Assert.False(label.IsVar);
+        Assert.Equal("CHECK_INPUT", label.Value);
+        Assert.Empty(CopiedText.ClassifyAll("「」"));
+        Assert.Empty(CopiedText.ClassifyAll(null));
+    }
+
+    [Theory]
+    [InlineData("goto :END_PROC", "END_PROC")]
+    [InlineData("GOTO END_PROC", "END_PROC")]
+    [InlineData("goto:END_PROC", "END_PROC")]
+    [InlineData("%RC%", null)]
+    [InlineData("if \"%RC%\" NEQ \"0\" goto :ERR", null)]
+    public void GotoTarget_cases(string inner, string? expected)
+        => Assert.Equal(expected, CopiedText.GotoTarget(inner));
+
+    [Fact]
+    public void Fullwidth_goto_is_recognized()
+        => Assert.Equal("END_PROC",
+            CopiedText.GotoTarget(Assert.Single(CopiedText.ClassifyAll("「ｇｏｔｏ　：ＥＮＤ＿ＰＲＯＣ」")).Value));
+
+    [Fact]
+    public void FindLabelLine_reports_label_line()
+    {
+        var r = Mapping.FindLabelLineInText(new[] { "x();", "  L:", "  // c", "  a();", "  if (rc != 0) b();" }, "L", "rc != 0");
+        Assert.Equal(LabelLineKind.Ok, r.Kind);
+        Assert.Equal(5, r.Line);
+        Assert.Equal(2, r.LabelLine);
+    }
+
+    [Fact]
+    public void GroupStops_same_line_shares_one_shot_and_orders_by_line()
+    {
+        var stops = Mapping.GroupStops(new[]
+        {
+            (@"C:\p\Program.cs", 40, 35, "total", "%TOTAL%"),
+            (@"C:\p\Program.cs", 27, 25, "rc", "%RC%"),
+            (@"c:\P\program.cs", 40, 35, "tax", "%TAX%"),
+            (@"C:\p\Program.cs", 92, 91, "", "goto :END_PROC"),
+        });
+        Assert.Equal(new[] { 27, 40, 92 }, stops.Select(s => s.Line));
+        Assert.Equal(new[] { "total", "tax" }, stops[1].Watch);
+        Assert.Empty(stops[2].Watch);
+    }
+
+    [Fact]
+    public void GroupStops_keeps_file_order_of_first_appearance()
+    {
+        var stops = Mapping.GroupStops(new[]
+        {
+            (@"C:\p\Steps.cs", 50, 48, "amount", "%AMT%"),
+            (@"C:\p\Program.cs", 10, 9, "rc", "%RC%"),
+        });
+        Assert.Equal(new[] { "Steps.cs", "Program.cs" }, stops.Select(s => Path.GetFileName(s.File)));
+    }
+
+    [Fact]
+    public void WatchMismatch_null_when_same_ignoring_spaces_and_order()
+        => Assert.Null(CaptureCheck.WatchMismatch(new[] { "rc", "rc!=0" }, new[] { "rc != 0", "rc" }));
+
+    [Fact]
+    public void WatchMismatch_reports_missing_extra_and_duplicates()
+        => Assert.Equal("Watch thiếu tax · dư rc, total.",
+            CaptureCheck.WatchMismatch(new[] { "rc", "rc", "total" }, new[] { "rc", "tax" }));
+
+    [Fact]
+    public void WatchMismatch_goto_stop_wants_empty_watch()
+    {
+        Assert.Null(CaptureCheck.WatchMismatch(Array.Empty<string>(), Array.Empty<string>()));
+        Assert.Equal("Watch dư rc.", CaptureCheck.WatchMismatch(new[] { "rc" }, Array.Empty<string>()));
+    }
+}
+
 // ==================== CaptureCheckTests ====================
 
 public class CaptureCheckTests

@@ -240,7 +240,7 @@ public class MainForm : Form
         var csL = Mapping.CleanLabel(csLabel);
         var csV = csVar.Trim();
         if (cmdL.Length == 0) return "cmdLabel đang trống.";
-        if (csL.Length == 0 || csV.Length == 0) return "csharpLabel / csharpVar không được để trống.";
+        if (csL.Length == 0 || (cmdV.Length > 0 && csV.Length == 0)) return "csharpLabel / csharpVar không được để trống.";   // ca goto: chỉ cần label
 
         var csPath = _targetCs.Text.Trim();
         if (csPath.Length == 0 || !File.Exists(csPath)) return $"Không thấy file .cs đích: {csPath}";

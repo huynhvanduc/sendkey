@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Text.RegularExpressions;
 using EnvDTE;
+using UIA = System.Windows.Automation;
 
 namespace SendKeyDemo;
 
@@ -65,6 +66,30 @@ public static class VsAutomation
         return reached == line
             ? $"đã tới {Path.GetFileName(file)}:{line}"
             : $"đã tới {Path.GetFileName(file)}:{reached} (file chỉ có {reached} dòng)";
+    }
+
+    /// <summary>
+    /// Mở đúng tab file .cs, đặt con trỏ ở dòng dừng và cuộn cho dòng label nằm đầu vùng nhìn (ảnh chụp
+    /// phải thấy label cần kiểm chứng), rồi đưa VS lên trước. Trả false nếu cuộn rồi vẫn không thấy label.
+    /// </summary>
+    public static bool ShowLabel(DTE dte, string file, int labelLine, int stopLine)
+    {
+        var win = dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView);
+        win.Activate();
+        ((TextSelection)win.Document.Selection).GotoLine(stopLine, false);
+        bool visible = true;
+        if (labelLine > 0 && win.Object is TextWindow tw)
+        {
+            var doc = (TextDocument)win.Document.Object("TextDocument");
+            var top = doc.CreateEditPoint();
+            top.MoveToLineAndOffset(labelLine, 1);
+            var bottom = doc.CreateEditPoint();
+            bottom.MoveToLineAndOffset(stopLine, 1);
+            tw.ActivePane.TryToShow(top, vsPaneShowHow.vsPaneShowTop, bottom);
+            visible = tw.ActivePane.IsVisible(top, bottom);
+        }
+        dte.MainWindow.Activate();
+        return visible;
     }
 
     public static string ToggleBreakpoint(DTE dte, string file, int line)
@@ -137,7 +162,7 @@ public static class VsAutomation
     /// <summary>
     /// Đọc trạng thái debugger để gác cổng trước khi chụp. Toàn read-only, không đổi gì phía VS.
     /// </summary>
-    public static DebugSnapshot ReadDebugState(DTE dte, string csFile, string expr)
+    public static DebugSnapshot ReadDebugState(DTE dte, string csFile, IReadOnlyList<string> exprs)
     {
         try
         {
@@ -172,24 +197,28 @@ public static class VsAutomation
             }
             catch (COMException) { /* chưa có collection */ }
 
-            bool exprValid = false;
-            string exprValue = "";
-            if (inBreak && !string.IsNullOrWhiteSpace(expr))
+            // Đọc từng biểu thức; hỏng cái nào thì nhớ tên cái đầu tiên để báo cho dev.
+            bool exprValid = inBreak;
+            string badExpr = "";
+            var values = new List<string>();
+            foreach (var expr in inBreak ? exprs : Array.Empty<string>())
             {
                 try
                 {
                     var e = dbg.GetExpression(expr, true, 2000);
-                    exprValid = e.IsValidValue;
-                    if (exprValid) exprValue = e.Value ?? "";
+                    if (e.IsValidValue) { values.Add(e.Value ?? ""); continue; }
                 }
                 catch (COMException) { /* biểu thức không evaluate được ở frame hiện tại */ }
+                if (badExpr.Length == 0) badExpr = expr;
+                exprValid = false;
             }
+            var exprValue = string.Join("; ", values);
 
             int pid = 0;
             try { pid = dbg.CurrentProcess?.ProcessID ?? 0; }
             catch (COMException) { /* chưa chạy */ }
 
-            return new DebugSnapshot(true, inBreak, hitFile, hitLine, bpInFile, exprValid, exprValue, pid);
+            return new DebugSnapshot(true, inBreak, hitFile, hitLine, bpInFile, exprValid, exprValue, pid, BadExpr: badExpr);
         }
         catch (Exception ex)
         {
@@ -255,6 +284,95 @@ public static class VsAutomation
             : $"không copy được clipboard — tự gõ \"{expression}\" vào cửa sổ Watch.";
     }
 
+    // ---- Watch tự điền: không gõ phím nào vào VS ----
+    // Đã thử trên VS 2022: Debug.AddWatch KHÔNG nhận tham số — nó lấy chữ đang bôi đen trong editor, và editor
+    // phải đang active (focus ở Watch thì VS nhân bản dòng watch đang chọn). Chỉ chạy khi VS đang dừng.
+    // DTE không có API đọc/xoá Watch và ActiveWindow trả null khi Watch active, nên đọc/xoá qua UI Automation.
+
+    /// <summary>
+    /// Đặt Watch 1 = đúng <paramref name="exprs"/>: xoá hết dòng cũ, rồi thêm từng biểu thức bằng cách bôi đen nó
+    /// trong file .cs (tìm từ <paramref name="fromLine"/>, không thấy thì tìm cả file) và gọi Debug.AddWatch.
+    /// Trả về biểu thức không tự thêm được; null nếu không xoá được Watch cũ (hoặc VS chưa dừng).
+    /// </summary>
+    public static List<string>? SetWatch(DTE dte, string file, int fromLine, IReadOnlyList<string> exprs)
+    {
+        if (dte.Debugger.CurrentMode != dbgDebugMode.dbgBreakMode) return null;
+        try { dte.ExecuteCommand("Debug.Watch1"); } catch (COMException) { return null; }
+        if (WatchTree(dte) is not { } tree || !ClearWatch(dte, tree)) return null;
+
+        var missed = new List<string>();
+        foreach (var expr in exprs)
+        {
+            try
+            {
+                var win = dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView);
+                win.Activate();
+                var sel = (TextSelection)win.Document.Selection;
+                int flags = (int)vsFindOptions.vsFindOptionsMatchCase |
+                            (Mapping.IsExpression(expr) ? 0 : (int)vsFindOptions.vsFindOptionsMatchWholeWord);
+                sel.MoveToLineAndOffset(Math.Max(1, fromLine), 1);
+                if (!sel.FindText(expr, flags) && !sel.FindText(expr, flags | (int)vsFindOptions.vsFindOptionsFromStart))
+                {
+                    missed.Add(expr);
+                    continue;
+                }
+                dte.ExecuteCommand("Debug.AddWatch");
+            }
+            catch (COMException) { missed.Add(expr); }
+        }
+        return missed;
+    }
+
+    /// <summary>Biểu thức các dòng đang có trong Watch 1; null nếu không đọc được.</summary>
+    public static List<string>? ReadWatchNames(DTE dte)
+    {
+        try { return WatchTree(dte) is { } tree ? WatchItems(tree).Select(i => i.Current.Name).ToList() : null; }
+        catch (Exception) { return null; }
+    }
+
+    static UIA.AutomationElement? WatchTree(DTE dte)
+    {
+        var hwnd = new IntPtr(dte.MainWindow.HWnd);
+        if (hwnd == IntPtr.Zero) return null;
+        return UIA.AutomationElement.FromHandle(hwnd).FindFirst(UIA.TreeScope.Descendants, new UIA.AndCondition(
+            new UIA.PropertyCondition(UIA.AutomationElement.ControlTypeProperty, UIA.ControlType.Tree),
+            new UIA.PropertyCondition(UIA.AutomationElement.NameProperty, "Watch 1")));
+    }
+
+    static List<UIA.AutomationElement> WatchItems(UIA.AutomationElement tree)
+        => tree.FindAll(UIA.TreeScope.Children,
+                new UIA.PropertyCondition(UIA.AutomationElement.ControlTypeProperty, UIA.ControlType.TreeItem))
+            .Cast<UIA.AutomationElement>().ToList();
+
+    /// <summary>
+    /// Xoá từng dòng Watch: chọn dòng bằng UI Automation rồi Edit.Delete — CHỈ khi focus đang nằm trong cây Watch,
+    /// để lệnh Delete không bao giờ rơi vào editor. Mỗi lần xoá được 1 dòng nên lặp tới hết.
+    /// </summary>
+    static bool ClearWatch(DTE dte, UIA.AutomationElement tree)
+    {
+        for (int guard = 0; guard < 100; guard++)
+        {
+            var items = WatchItems(tree);
+            if (items.Count == 0) return true;
+
+            items[0].SetFocus();
+            ((UIA.SelectionItemPattern)items[0].GetCurrentPattern(UIA.SelectionItemPattern.Pattern)).Select();
+            if (!FocusInside(tree)) return false;
+
+            dte.ExecuteCommand("Edit.Delete");
+            if (WatchItems(tree).Count >= items.Count) return false;   // không xoá được — dừng, đừng lặp mãi
+        }
+        return false;
+    }
+
+    static bool FocusInside(UIA.AutomationElement element)
+    {
+        var walker = UIA.TreeWalker.ControlViewWalker;
+        for (var f = UIA.AutomationElement.FocusedElement; f != null; f = walker.GetParent(f))
+            if (UIA.Automation.Compare(f, element)) return true;
+        return false;
+    }
+
     // ---- COM message filter: tự retry khi VS đang bận ----
     public static class OleMessageFilter
     {
@@ -310,7 +428,8 @@ public record DebugSnapshot(
     bool ExprValid,
     string ExprValue,
     int ProcessId,
-    string? Error = null)
+    string? Error = null,
+    string BadExpr = "")
 {
     public static DebugSnapshot Unavailable(string error) =>
         new(false, false, "", 0, 0, false, "", 0, error);
@@ -337,6 +456,25 @@ public static class CaptureCheck
         if (t.Length >= 2 && ((t[0] == '"' && t[^1] == '"') || (t[0] == '\'' && t[^1] == '\'')))
             t = t[1..^1];
         return t.Trim();
+    }
+
+    /// <summary>
+    /// So các dòng đang có trong Watch với biến cần chụp (bỏ qua khoảng trắng). Khớp → null;
+    /// lệch → "Watch thiếu …· dư …" (dòng lặp lại cũng tính là dư).
+    /// </summary>
+    public static string? WatchMismatch(IReadOnlyList<string> inWatch, IReadOnlyList<string> expected)
+    {
+        static string Key(string s) => new(s.Where(c => !char.IsWhiteSpace(c)).ToArray());
+        var have = inWatch.Select(Key).ToList();
+        var want = expected.Select(Key).ToList();
+        var missing = expected.Where(e => !have.Contains(Key(e))).ToList();
+        var extra = inWatch.Where((w, i) => !want.Contains(have[i]) || have.IndexOf(have[i]) != i).Distinct().ToList();
+        if (missing.Count == 0 && extra.Count == 0) return null;
+
+        var parts = new List<string>();
+        if (missing.Count > 0) parts.Add("thiếu " + string.Join(", ", missing));
+        if (extra.Count > 0) parts.Add("dư " + string.Join(", ", extra));
+        return "Watch " + string.Join(" · ", parts) + ".";
     }
 
     static bool SameFile(string a, string b)
@@ -375,7 +513,7 @@ public static class CaptureCheck
 
         if (hasExpr && !s.ExprValid)
             return new CheckResult(CheckLevel.Block,
-                $"Không đọc được giá trị \"{watchExpr}\" ở dòng này — sai biểu thức hoặc biến chưa vào scope.");
+                $"Không đọc được giá trị \"{(s.BadExpr.Length > 0 ? s.BadExpr : watchExpr)}\" ở dòng này — sai biểu thức hoặc biến chưa vào scope.");
 
         var bpNote = s.BreakpointsInFile > 1 ? $" (còn {s.BreakpointsInFile} breakpoint trong file)" : "";
 
