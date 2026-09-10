@@ -1,0 +1,154 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using SendKeyDemo;
+using Xunit;
+using Xunit.Abstractions;
+
+namespace SendKeyDemo.Tests;
+
+// Chạy đúng luồng "copy từ Excel" trên CHÍNH file samples/BigSample/tc-input-jp.txt:
+// mỗi khối lấy dòng dưới "ラベル" làm label, dòng dưới "確認値" làm biến, cho qua
+// CopiedText.Classify rồi tra mapping.csv — giống hệt cái app làm khi nghe clipboard.
+// Bỏ phần đặt breakpoint / GoToLine (cần DTE sống).
+public class JpInputFixtureTests
+{
+    readonly ITestOutputHelper _out;
+    public JpInputFixtureTests(ITestOutputHelper o) => _out = o;
+
+    static string Dir
+    {
+        get
+        {
+            var d = AppContext.BaseDirectory;
+            while (d != null && !File.Exists(Path.Combine(d, "SendKeyDemo.sln")))
+                d = Path.GetDirectoryName(d);
+            return Path.Combine(d!, "samples", "BigSample");
+        }
+    }
+
+    record Block(string Tc, string LabelLine, string VarLine);
+
+    /// <summary>Bóc các khối TC: dòng ngay sau "ラベル" là label, ngay sau "確認値" là câu chứa 「 」.</summary>
+    static List<Block> ReadBlocks()
+    {
+        var lines = File.ReadAllLines(Path.Combine(Dir, "tc-input-jp.txt"));
+        var blocks = new List<Block>();
+        string tc = "", label = "";
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var t = lines[i].Trim();
+            if (t.StartsWith("TC-")) { tc = t.Split(' ')[0]; continue; }
+            if (t == "ラベル") { label = NextNonEmpty(lines, i); continue; }
+            if (t == "確認値" && label.Length > 0)
+            {
+                blocks.Add(new Block(tc, label, NextNonEmpty(lines, i)));
+                label = "";
+            }
+        }
+        return blocks;
+    }
+
+    static string NextNonEmpty(string[] lines, int from)
+    {
+        for (int i = from + 1; i < lines.Length; i++)
+            if (lines[i].Trim().Length > 0) return lines[i].Trim();
+        return "";
+    }
+
+    [Fact]
+    public void File_has_all_eighteen_blocks()
+        => Assert.Equal(18, ReadBlocks().Count);
+
+    [Fact]
+    public void Label_line_classifies_as_label_and_var_line_as_variable()
+    {
+        foreach (var b in ReadBlocks())
+        {
+            var lbl = CopiedText.Classify(b.LabelLine);
+            Assert.True(lbl is { IsVar: false }, $"{b.Tc}: dòng label không nhận ra — \"{b.LabelLine}\"");
+
+            var v = CopiedText.Classify(b.VarLine);
+            Assert.True(v is { IsVar: true }, $"{b.Tc}: dòng 確認値 phải bóc ra biến — \"{b.VarLine}\"");
+        }
+    }
+
+    [Fact]
+    public void Fifteen_pairs_resolve_and_three_are_deliberately_missing()
+    {
+        var rows = Mapping.Load(Path.Combine(Dir, "mapping.csv"));
+        var missing = new List<string>();
+        int ok = 0;
+        string? clauseLine = null, fullWidthLine = null, plainRcLine = null;
+
+        foreach (var b in ReadBlocks())
+        {
+            var label = CopiedText.Classify(b.LabelLine)!.Value;
+            var cmdVar = CopiedText.Classify(b.VarLine)!.Value;
+
+            var res = Mapping.Resolve(rows, label, cmdVar);
+            if (res.Kind != LookupKind.Ok)
+            {
+                _out.WriteLine($"[CHƯA CÓ] {b.Tc}  {label} / {cmdVar} — {res.Kind}");
+                missing.Add(b.Tc);
+                continue;
+            }
+
+            var row = res.Row!;
+            var csFile = row.CsharpFile.Length == 0 ? "Program.cs" : row.CsharpFile;
+            var ll = Mapping.FindLabelLine(Path.Combine(Dir, csFile), row.CsharpLabel, row.CsharpVar);
+            Assert.True(ll.Kind == LabelLineKind.Ok, $"{b.Tc}: {row.CsharpLabel} không ra dòng — {ll.Kind}");
+
+            _out.WriteLine($"[OK] {b.Tc}  {label} / {cmdVar}  → {csFile}:{ll.Line}  (watch: {row.CsharpVar})");
+            ok++;
+
+            if (b.Tc == "TC-04") plainRcLine = $"{csFile}:{ll.Line}";
+            if (b.Tc == "TC-11") fullWidthLine = $"{csFile}:{ll.Line}";
+            if (b.Tc == "TC-12") clauseLine = $"{csFile}:{ll.Line}";
+        }
+
+        Assert.Equal(15, ok);
+        Assert.Equal(new[] { "TC-16", "TC-17", "TC-18" }, missing);
+
+        // Full-width ％ＲＣ％ phải ra đúng chỗ như %RC% thường.
+        Assert.Equal(plainRcLine, fullWidthLine);
+        // Mệnh đề trong 『 』 phải anchor tới dòng "if (rc != 0) …", không phải đầu label.
+        Assert.Equal("Program.cs:39", clauseLine);
+        Assert.NotEqual(plainRcLine, clauseLine);
+    }
+
+    // Phần E của file hướng dẫn gõ tay csharpLabel/csharpVar — kiểm để hướng dẫn không lạc hậu
+    // khi Program.cs đổi.
+    [Theory]
+    [InlineData("RECALC_VIA_HELPER", "total")]
+    [InlineData("ROLLBACK_VIA_HELPER", "rc")]
+    [InlineData("END_PROC", "rc")]
+    public void Suggested_csharp_pairs_validate_against_the_code(string csLabel, string csVar)
+    {
+        var ll = Mapping.FindLabelLine(Path.Combine(Dir, "Program.cs"), csLabel, csVar);
+        Assert.Equal(LabelLineKind.Ok, ll.Kind);
+    }
+
+    [Fact]
+    public void Wrong_suggestion_in_the_file_really_fails()
+    {
+        // File bảo gõ NOSUCH để xem báo đỏ — đảm bảo nó vẫn hỏng thật.
+        var ll = Mapping.FindLabelLine(Path.Combine(Dir, "Program.cs"), "NOSUCH", "rc");
+        Assert.Equal(LabelLineKind.NotFound, ll.Kind);
+    }
+
+    [Fact]
+    public void Section_F_lines_are_ignored_by_the_clipboard_watcher()
+    {
+        var text = File.ReadAllText(Path.Combine(Dir, "tc-input-jp.txt"));
+        var prose = text.Split('\n')
+            .Select(l => l.Trim())
+            .First(l => l.StartsWith("本テストケース"));
+
+        Assert.Null(CopiedText.Classify(prose));    // câu mô tả dài, không ngoặc
+        Assert.Null(CopiedText.Classify("「」"));
+        Assert.Null(CopiedText.Classify("「　」"));
+    }
+}
