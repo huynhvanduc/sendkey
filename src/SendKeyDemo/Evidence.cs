@@ -387,20 +387,20 @@ public sealed class EvidenceSession : IDisposable
         Beep(StripState.Ok);
         _host.Log($"Chụp XONG {TcId} · {Path.GetFileName(stop.File)}:{stop.Line} → clipboard (Ctrl+V để dán).");
 
-        // Mệnh đề if: đã chụp giá trị thật → ép mệnh đề ĐÚNG để F5 đi vào nhánh (ảnh sau ở lệnh đầu nhánh).
-        // Làm trước khi đưa Excel lên; app KHÔNG tự chạy tiếp.
+        // Mệnh đề if: đã chụp giá trị thật → set cho mệnh đề ĐÚNG để F5 đi vào nhánh (ảnh sau ở lệnh đầu nhánh).
+        // Làm trước khi đưa Excel lên; app KHÔNG tự chạy tiếp. Giá trị sửa được ở ô trên thanh.
         string? bypassNote = null;
         var bypassState = StripState.Pending;
+        _pendingBypass = null;
         if (stop.Condition.Length > 0)
         {
-            if (stop.SetStatement.Length == 0)
+            if (stop.Items.Where(IfClause.IsIf).Select(IfClause.Suggest).FirstOrDefault(b => b != null) is not { } bypass)
                 (bypassNote, bypassState) = ($"「{stop.Items[0]}」: tự set giá trị cho mệnh đề này rồi F5.", StripState.Confirm);
-            else if (_host.CurrentDte() is not { } dteSet)
-                (bypassNote, bypassState) = ($"Mất kết nối VS — chưa chạy được {stop.SetStatement}.", StripState.Block);
-            else if (VsAutomation.RunIfBypass(dteSet, stop.File, stop.LabelLine, stop.SetStatement, stop.Condition) is { } err)
-                (bypassNote, bypassState) = (err, StripState.Block);
             else
-                _host.Log($"Chụp: đã chạy {stop.SetStatement} — {stop.Condition} = true.");
+            {
+                _pendingBypass = (stop, bypass);
+                (bypassNote, bypassState) = ApplyBypass(stop, bypass);
+            }
         }
 
         bool all = _done.Count == _stops.Count;
@@ -409,10 +409,32 @@ public sealed class EvidenceSession : IDisposable
             ? $"✓ đủ {_stops.Count} ảnh — copy test case tiếp"
             : $"Ctrl+V rồi F5 trong VS → {TargetText(_stops, NextStop())}");
         _bar.SetStatus(bypassNote != null ? bypassState : all ? StripState.Ok : StripState.Pending, bypassNote);
+        if (_pendingBypass is { } pending) _bar.AskValue(pending.Bypass.Var, pending.Bypass.Value);   // sau SetPair (SetPair ẩn ô)
         if (bypassNote != null) Beep(bypassState);
 
         // Đưa lại cửa sổ vừa copy (Excel) để Ctrl+V luôn.
         if (_sourceWindow != IntPtr.Zero) SetForegroundWindow(_sourceWindow);
+    }
+
+    /// <summary>Chạy lệnh set (mẫu IfSetStatement trong settings) cho mệnh đề if rồi kiểm mệnh đề = true. Trả câu báo + màu; null = ổn.</summary>
+    (string? Note, StripState State) ApplyBypass(StopPoint stop, IfBypass bypass)
+    {
+        var statement = IfClause.Statement(_settings.IfSetStatement, bypass);
+        if (_host.CurrentDte() is not { } dte) return ($"Mất kết nối VS — chưa chạy được {statement}.", StripState.Block);
+        if (VsAutomation.RunIfBypass(dte, statement, stop.Condition) is { } err) return (err, StripState.Block);
+        _host.Log($"Chụp: đã chạy {statement} — {stop.Condition} = true.");
+        return (null, StripState.Pending);
+    }
+
+    /// <summary>Enter trong ô giá trị trên thanh: chạy lại lệnh set với giá trị mới rồi kiểm lại mệnh đề.</summary>
+    void OnValueSubmitted(string value)
+    {
+        if (!_active || _pendingBypass is not { } pending || value.Length == 0) return;
+        var bypass = pending.Bypass with { Value = value };
+        _pendingBypass = (pending.Stop, bypass);
+        var (note, state) = ApplyBypass(pending.Stop, bypass);
+        _bar.SetStatus(note != null ? state : StripState.Pending, note);
+        Beep(note != null ? state : StripState.Ok);
     }
 
     // ---------------- trợ giúp ----------------
@@ -435,6 +457,7 @@ public sealed class EvidenceSession : IDisposable
         _currentStop = -1;
         _confirmed = null;
         _askingItem = null;
+        _pendingBypass = null;
     }
 
     int NextStop()
