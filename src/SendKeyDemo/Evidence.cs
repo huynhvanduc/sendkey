@@ -517,7 +517,8 @@ public enum StripState { Idle, Pending, Ok, Confirm, Block }
 /// Màu chấm (và viền thanh): xám = chờ copy · xanh dương = chờ chương trình dừng ở breakpoint · xanh lá = chụp được · vàng = ⚠ · đỏ = ❌.
 /// Dòng 2 chỉ hiện khi vàng/đỏ, đúng 1 câu lý do. Chưa có mapping thì ô nhập C# hiện ngay sau mũi tên
 /// (ca goto chỉ 1 ô csharpLabel); Enter = <see cref="InputSubmitted"/>.
-/// Không cướp focus khi hiện/cập nhật — chỉ lấy focus lúc cần gõ (<see cref="AskInput"/>).
+/// Không cướp focus khi hiện/cập nhật — chỉ lấy focus lúc cần gõ C# (<see cref="AskInput"/>); ô sửa giá trị SET
+/// của mệnh đề if (<see cref="AskValue"/>) KHÔNG lấy focus.
 /// Kéo thanh ở bất kỳ chỗ nào trừ ô nhập; double-click = mở cửa sổ cấu hình.
 /// </summary>
 public sealed class EvidenceBarForm : Form
@@ -533,6 +534,9 @@ public sealed class EvidenceBarForm : Form
     readonly Label _target = new() { AutoSize = false, AutoEllipsis = true, Margin = new Padding(0, 4, 0, 0) };
     readonly TextBox _csLabel = new() { Visible = false, Margin = new Padding(0, 2, 6, 0) };
     readonly TextBox _csVar = new() { Visible = false, Margin = new Padding(0, 2, 0, 0) };
+    // Ô sửa giá trị đã SET cho mệnh đề if, vd "RC = [1]" — xem AskValue.
+    readonly Label _valueName = new() { AutoSize = true, Visible = false, Margin = new Padding(8, 4, 4, 0) };
+    readonly TextBox _value = new() { Visible = false, Margin = new Padding(0, 2, 0, 0) };
     readonly Label _reason = new() { AutoSize = true, Visible = false, Margin = new Padding(22, 3, 0, 1) };
 
     readonly TableLayoutPanel _body;
@@ -542,6 +546,8 @@ public sealed class EvidenceBarForm : Form
 
     /// <summary>Enter trong ô nhập: (csharpLabel, csharpVar); ca goto thì csharpVar = "".</summary>
     public event Action<string, string>? InputSubmitted;
+    /// <summary>Enter trong ô giá trị (<see cref="AskValue"/>): giá trị mới để chạy lại lệnh SET.</summary>
+    public event Action<string>? ValueSubmitted;
     public event Action? OpenConfigRequested;
 
     protected override bool ShowWithoutActivation => true;
@@ -566,8 +572,10 @@ public sealed class EvidenceBarForm : Form
         _cmd.Font = _arrow.Font = _target.Font = _reason.Font = text;
         _cmd.ForeColor = _arrow.ForeColor = Theme.TextSecondary;
         _target.ForeColor = _reason.ForeColor = Theme.TextPrimary;
+        _valueName.Font = text;
+        _valueName.ForeColor = Theme.TextSecondary;
 
-        foreach (var tb in new[] { _csLabel, _csVar })
+        foreach (var tb in new[] { _csLabel, _csVar, _value })
         {
             tb.BorderStyle = BorderStyle.FixedSingle;
             tb.BackColor = InputBack;
@@ -581,7 +589,7 @@ public sealed class EvidenceBarForm : Form
             AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false,
             Margin = new Padding(0), BackColor = Theme.PanelBackground,
         };
-        line1.Controls.AddRange(new Control[] { _dot, _cmd, _arrow, _target, _csLabel, _csVar });
+        line1.Controls.AddRange(new Control[] { _dot, _cmd, _arrow, _target, _valueName, _value, _csLabel, _csVar });
 
         _body = new TableLayoutPanel
         {
@@ -592,7 +600,7 @@ public sealed class EvidenceBarForm : Form
         _body.Controls.Add(_reason, 0, 1);
         Controls.Add(_body);
 
-        foreach (var c in new Control[] { this, _body, line1, _dot, _cmd, _arrow, _target, _reason })
+        foreach (var c in new Control[] { this, _body, line1, _dot, _cmd, _arrow, _target, _valueName, _reason })
             c.MouseDown += DragOrOpenConfig;
 
         SetPair("", Array.Empty<string>(), "");
@@ -620,6 +628,11 @@ public sealed class EvidenceBarForm : Form
         int used = 0;
         foreach (var c in new Control[] { _dot, _cmd, _arrow })
             if (c.Visible) used += c.PreferredSize.Width + c.Margin.Horizontal;
+        if (_value.Visible)
+        {
+            _value.Width = LogicalToDeviceUnits(90);
+            used += _valueName.PreferredSize.Width + _valueName.Margin.Horizontal + _value.Width + _value.Margin.Horizontal;
+        }
         int room = Math.Max(LogicalToDeviceUnits(80), inner - used);
 
         _target.Width = room - _target.Margin.Horizontal;
@@ -644,6 +657,7 @@ public sealed class EvidenceBarForm : Form
         _target.Text = Clip(target, 70);
         _labelOnly = false;
         _csLabel.Text = _csVar.Text = "";
+        _valueName.Visible = _value.Visible = false;
         SetInputVisible(false);
     }
 
@@ -653,6 +667,7 @@ public sealed class EvidenceBarForm : Form
     /// </summary>
     public void AskInput(bool labelOnly, string forItem, string csLabel, string csVar)
     {
+        _valueName.Visible = _value.Visible = false;
         FillInput(labelOnly, forItem, csLabel, csVar);
         SetInputVisible(true);
 
@@ -660,6 +675,19 @@ public sealed class EvidenceBarForm : Form
         var box = !labelOnly && _csLabel.Text.Trim().Length > 0 ? _csVar : _csLabel;
         box.Focus();
         box.SelectionStart = box.TextLength;
+    }
+
+    /// <summary>
+    /// Hiện ô sửa giá trị đã SET cho mệnh đề if, vd "RC = [1]"; Enter = <see cref="ValueSubmitted"/>.
+    /// KHÔNG lấy focus: hàm này được gọi ngay sau khi chụp, lúc app vừa đưa Excel lên cho dev Ctrl+V —
+    /// lấy focus thì Ctrl+V sẽ dán vào ô này. Muốn sửa giá trị thì click vào ô.
+    /// </summary>
+    public void AskValue(string varName, string value)
+    {
+        _valueName.Text = $"{varName} =";
+        _value.Text = value;
+        _valueName.Visible = _value.Visible = true;
+        Fit();
     }
 
     /// <summary>reason chỉ hiện ở dòng 2 khi state là Confirm/Block; null/rỗng = không hiện dòng 2.</summary>
@@ -710,6 +738,7 @@ public sealed class EvidenceBarForm : Form
     {
         if (e.KeyCode is not (Keys.Enter or Keys.Return)) return;
         e.SuppressKeyPress = true;
+        if (sender == _value) { ValueSubmitted?.Invoke(_value.Text.Trim()); return; }
         InputSubmitted?.Invoke(_csLabel.Text.Trim(), _labelOnly ? "" : _csVar.Text.Trim());
     }
 
