@@ -261,7 +261,7 @@ public static class VsAutomation
     {
         if (string.IsNullOrWhiteSpace(expression)) return "biểu thức trống";
         if (dte.Debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
-            return "Chưa ở break mode — cho chương trình chạy (Ctrl+Shift+Z) và DỪNG lại ở breakpoint, rồi mới Add Watch.";
+            return "Chưa ở break mode — cho chương trình chạy và DỪNG lại ở breakpoint, rồi mới Add Watch.";
 
         var copied = false;
         try { Clipboard.SetText(expression); copied = true; } catch { /* clipboard đang bận */ }
@@ -515,14 +515,15 @@ public static class CaptureCheck
         string expectedFile,
         int expectedLine,
         string watchExpr,
-        LastCapture? previous)
+        LastCapture? previous,
+        string runKey = "")
     {
         if (!s.Available)
             return new CheckResult(CheckLevel.Block, s.Error ?? "Không đọc được trạng thái VS — bấm Refresh chọn lại instance.");
 
         if (!s.InBreakMode)
             return new CheckResult(CheckLevel.Block,
-                "Chưa dừng ở breakpoint — bấm Ctrl+Shift+Z cho chương trình chạy, đợi DỪNG lại rồi mới chụp.");
+                $"Chưa dừng ở breakpoint — {(runKey.Length > 0 ? $"bấm {runKey} cho" : "cho")} chương trình chạy, đợi DỪNG lại rồi mới chụp.");
 
         if (string.IsNullOrEmpty(s.HitFile) || s.HitLine <= 0)
             return new CheckResult(CheckLevel.Block,

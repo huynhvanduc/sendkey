@@ -321,7 +321,8 @@ public sealed class EvidenceSession : IDisposable
         }
 
         var snap = VsAutomation.ReadDebugState(dte, stop.File, stop.Watch);
-        var result = CaptureCheck.Evaluate(snap, TcId, stop.File, stop.Line, string.Join("; ", stop.Watch), _last);
+        var result = CaptureCheck.Evaluate(snap, TcId, stop.File, stop.Line, string.Join("; ", stop.Watch), _last,
+            _settings.RunHotkey);
 
         // Watch phải có đúng biến của dòng này — lý do bị review trả ảnh nhiều nhất.
         if (result.Level != CheckLevel.Block && VsAutomation.ReadWatchNames(dte) is { } names &&
