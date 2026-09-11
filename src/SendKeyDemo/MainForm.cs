@@ -1,5 +1,5 @@
-using System.Runtime.InteropServices;
 using EnvDTE;
+using System.Runtime.InteropServices;
 
 namespace SendKeyDemo;
 
@@ -16,8 +16,11 @@ public class MainForm : Form
     readonly Button _addWatch = new() { Text = "Add Watch", AutoSize = true };
     readonly TextBox _log = new()
     {
-        Multiline = true, ReadOnly = true, Dock = DockStyle.Fill,
-        ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 9f)
+        Multiline = true,
+        ReadOnly = true,
+        Dock = DockStyle.Fill,
+        ScrollBars = ScrollBars.Vertical,
+        Font = new Font("Consolas", 9f)
     };
 
     // --- mapping mode ---
@@ -37,7 +40,7 @@ public class MainForm : Form
     DateTime _mapRowsMtime;
 
     // --- chụp bằng chứng (gộp từ QuickShot) ---
-    readonly Button _startEvidence = new() { Text = "▶  Bắt đầu chụp bằng chứng" };
+    readonly Button _startEvidence = new() { Text = "▶  Khởi động" };
     readonly Button _advancedToggle = new() { Text = "▸  Công cụ khác" };
     Panel _advanced = new();
     Label _hotkeyHint = new();
@@ -45,40 +48,44 @@ public class MainForm : Form
     HotkeyWindow _hotkeys = new();
     EvidenceSession? _evidence;
     AppSettings _settings = new();
-    Rectangle? _savedRegion;      // vùng chụp đã khoanh, dùng lại cho mọi lần chụp
-    bool _reallyExit;             // false = bấm X thì thu về tray, không thoát
+    Rectangle? _savedRegion;
+    bool _reallyExit;
 
-    /// <summary>Ô chứa nút bên phải hàng — GrowAndShrink để cột AutoSize đo đúng, không đẩy tràn khung.</summary>
     static FlowLayoutPanel ButtonCell(params Control[] buttons)
     {
         var cell = new FlowLayoutPanel
         {
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Margin = new Padding(0), WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0),
+            WrapContents = false,
         };
         cell.Controls.AddRange(buttons);
         return cell;
     }
 
-    // Nhãn AutoSize trong cột AutoSize: tự đo theo font + DPI. Cột px cứng bị co ×0.8 khi cửa sổ
-    // chuyển từ màn 125% sang màn 100% và cắt chữ thành "Visual Stu…".
     static Label RowLabel(string text) => new()
     {
-        Text = text, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 0, 6, 0),
+        Text = text,
+        AutoSize = true,
+        Anchor = AnchorStyles.Left,
+        Margin = new Padding(3, 0, 6, 0),
     };
 
     public MainForm()
     {
         Text = "SendKey Evidence";
         AutoScaleMode = AutoScaleMode.Dpi;
-        // Kích thước cửa sổ đặt ở Load (xem lý do ở đó). Ở đây tránh số px cứng — dùng AutoSize.
 
         // ---------- 1. Khối chuẩn bị: 3 thứ duy nhất cần trước khi chụp ----------
         _instances.Dock = DockStyle.Fill;
 
         var setup = new TableLayoutPanel
         {
-            Dock = DockStyle.Top, ColumnCount = 3, RowCount = 3, AutoSize = true,
+            Dock = DockStyle.Top,
+            ColumnCount = 3,
+            RowCount = 3,
+            AutoSize = true,
             Padding = new Padding(12, 12, 12, 4),
         };
         setup.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -107,7 +114,9 @@ public class MainForm : Form
 
         var hotkeyHint = new Label
         {
-            Dock = DockStyle.Top, AutoSize = true, ForeColor = SystemColors.GrayText,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
             Padding = new Padding(2, 6, 2, 0),
         };
         _hotkeyHint = hotkeyHint;
@@ -128,7 +137,10 @@ public class MainForm : Form
 
         var adv = new TableLayoutPanel
         {
-            Dock = DockStyle.Top, ColumnCount = 3, AutoSize = true, Padding = new Padding(12, 0, 12, 8),
+            Dock = DockStyle.Top,
+            ColumnCount = 3,
+            AutoSize = true,
+            Padding = new Padding(12, 0, 12, 8),
         };
         adv.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         adv.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -153,7 +165,9 @@ public class MainForm : Form
         // ---------- 4. Log + chân cửa sổ ----------
         var bottomPanel = new FlowLayoutPanel
         {
-            Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(12, 0, 12, 6),
+            Dock = DockStyle.Bottom,
+            AutoSize = true,
+            Padding = new Padding(12, 0, 12, 6),
         };
         bottomPanel.Controls.Add(_topMostBox);
 
@@ -225,11 +239,6 @@ public class MainForm : Form
     internal DTE? CurrentDte() => (_instances.SelectedItem as VsInstance)?.Dte;
     internal Rectangle? SavedRegion => _savedRegion;
 
-    /// <summary>
-    /// Ghi thêm 1 dòng mapping từ thanh chụp bằng chứng (không popup): validate csharpLabel/csharpVar
-    /// với file .cs đích trước, hỏng thì trả lý do để thanh hiện lên. Dòng mới dùng ô "target .cs"
-    /// (muốn cột csharpFile riêng thì sửa thẳng mapping.csv).
-    /// </summary>
     internal string? AddMapping(string cmdLabel, string cmdVar, string csLabel, string csVar)
     {
         var mappingCsv = _mappingPath.Text.Trim();
@@ -278,7 +287,6 @@ public class MainForm : Form
     void SaveSettings()
     {
         if (_loading) return;
-        // Sửa trên đối tượng đã nạp, KHÔNG tạo mới — tạo mới sẽ xóa mất phần cấu hình hotkey/chụp.
         _settings.MappingPath = _mappingPath.Text;
         _settings.TargetCsPath = _targetCs.Text;
         _settings.TopMost = _topMostBox.Checked;
@@ -382,7 +390,6 @@ public class MainForm : Form
         foreach (var p in problems) Log("  - " + p);
     }
 
-    /// <summary>Đường dẫn .cs hiệu lực cho 1 dòng: CsharpFile (tuyệt đối, hoặc tương đối theo thư mục mapping.csv), rỗng = ô "target .cs".</summary>
     internal string EffectiveCsPath(MapRow row)
     {
         var f = row.CsharpFile.Trim();

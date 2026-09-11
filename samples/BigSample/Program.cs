@@ -1,6 +1,3 @@
-using System;
-using System.Threading;
-
 namespace BigSample;
 
 // Mô phỏng một job batch đã migrate sang C#: giữ nguyên cấu trúc "nhãn:" + goto,
@@ -32,25 +29,25 @@ static class Program
         Console.WriteLine($"READ_PARAMS: paramFile={paramFile}, rc={rc}");
         if (rc != 0) goto HANDLE_ERROR;
 
-    CHECK_INPUT:
+        CHECK_INPUT:
         inputFile = "orders.csv";
         rc = inputFile.EndsWith(".csv") ? 0 : 12;
         Console.WriteLine($"CHECK_INPUT: inputFile={inputFile}, rc={rc}");
         if (rc != 0) goto HANDLE_ERROR;
 
-    VALIDATE_HEADER:
+        VALIDATE_HEADER:
         headerOk = inputFile.Length > 3;
         rc = headerOk ? 0 : 20;
         Console.WriteLine($"VALIDATE_HEADER: headerOk={headerOk}, rc={rc}");
         if (rc != 0) goto HANDLE_ERROR;
 
-    VALIDATE_DETAIL:
+        VALIDATE_DETAIL:
         lineCount = 42;
         rc = lineCount > 0 ? 0 : 24;
         Console.WriteLine($"VALIDATE_DETAIL: lineCount={lineCount}, rc={rc}");
         if (rc != 0) goto HANDLE_ERROR;
 
-    CALC_TAX:
+        CALC_TAX:
         tax = lineCount * 1.5m;
         Console.WriteLine($"CALC_TAX: tax={tax}");
 
@@ -68,7 +65,7 @@ static class Program
         Console.WriteLine($"RECALC_VIA_HELPER: total={total}, rc={rc}");
         if (rc != 0) goto ROLLBACK_VIA_HELPER;
 
-    WRITE_OUTPUT:
+        WRITE_OUTPUT:
         outFile = "result.txt";
         rc = outFile.Length > 0 ? 0 : 28;
         Console.WriteLine($"WRITE_OUTPUT: outFile={outFile}, rc={rc}");

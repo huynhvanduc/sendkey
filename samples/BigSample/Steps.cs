@@ -1,5 +1,3 @@
-using System;
-
 namespace BigSample;
 
 // File .cs thứ hai — dùng để test cột "csharpFile" trong mapping.csv

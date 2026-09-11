@@ -1,8 +1,3 @@
-using System;
-using System.IO;
-using SendKeyDemo;
-using Xunit;
-
 namespace SendKeyDemo.Tests;
 
 public class MappingTests

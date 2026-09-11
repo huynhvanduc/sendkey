@@ -1,16 +1,8 @@
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
 using System.Media;
 using System.Runtime.InteropServices;
 
 namespace SendKeyDemo;
 
-/// <summary>
-/// Một đợt chụp bằng chứng. Nghe clipboard để gom label + các 「」 copy từ file test case, tra mapping.csv
-/// (chưa có thì hỏi C# ngay trên thanh rồi ghi thêm), đặt breakpoint cho từng dòng cần chụp, tự điền Watch
-/// khi VS dừng, và gác cổng phím chụp — sai thao tác cơ học thì KHÔNG cho ra ảnh.
-/// Mỗi dòng dừng = 1 ảnh; Watch mỗi lần chỉ gồm biến của dòng đó.
-/// </summary>
 public sealed class EvidenceSession : IDisposable
 {
     readonly MainForm _host;
@@ -18,23 +10,21 @@ public sealed class EvidenceSession : IDisposable
     readonly EvidenceBarForm _bar = new();
 
     ClipboardWatcher? _clip;
-    VsAutomation.BreakWatcher? _watcher;     // phải giữ field, xem chú thích trong BreakWatcher
+    VsAutomation.BreakWatcher? _watcher;
     LastCapture? _last;
     bool _active;
 
-    // Nhóm đang chụp: label + nội dung các 「」 đã copy, theo thứ tự.
     string _cmdLabel = "";
     readonly List<string> _items = new();
-    string? _askingItem;                     // 「」 đang chờ gõ C# trên thanh
+    string? _askingItem;
 
-    // Sau G: các dòng cần chụp (đã đặt breakpoint), dòng nào chụp xong, dòng VS đang dừng.
     List<StopPoint> _stops = new();
     readonly HashSet<int> _done = new();
     int _currentStop = -1;
     List<string> _bpFiles = new();
-    string? _confirmed;                      // lý do ⚠ đã báo — bấm chụp lần nữa mới ra ảnh
-    IntPtr _sourceWindow;                    // cửa sổ lúc copy (Excel) — chụp xong đưa lên lại
-    (StopPoint Stop, IfBypass Bypass)? _pendingBypass;   // dòng if vừa chụp + giá trị đã set, sửa được ở ô trên thanh
+    string? _confirmed;
+    IntPtr _sourceWindow;
+    (StopPoint Stop, IfBypass Bypass)? _pendingBypass;
 
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -50,10 +40,7 @@ public sealed class EvidenceSession : IDisposable
     public bool Active => _active;
     public EvidenceBarForm Bar => _bar;
 
-    /// <summary>Tên nhóm đang chụp, chỉ để ghi vào thông báo — vd "CHECK_INPUT「%RC%」「%TAX%」".</summary>
     string TcId => _cmdLabel + string.Concat(_items.Select(i => $"「{i}」"));
-
-    // ---------------- vòng đời ----------------
 
     /// <summary>Bắt đầu đợt: hiện thanh, nghe clipboard, bám sự kiện VS dừng.</summary>
     public void Start()
@@ -149,10 +136,6 @@ public sealed class EvidenceSession : IDisposable
         Resolve(ask: false);   // chỉ báo; không cướp focus khỏi Excel lúc dev còn đang copy
     }
 
-    /// <summary>
-    /// Tra mọi 「」 trong nhóm ra các dòng cần chụp. Có cái chưa có trong mapping.csv thì báo vàng — và nếu
-    /// <paramref name="ask"/> thì mở ô gõ C# ngay trên thanh. Lỗi khác báo đỏ. Không tra đủ → null.
-    /// </summary>
     List<StopPoint>? Resolve(bool ask)
     {
         _bar.SetPair(_cmdLabel, _items, "");
@@ -276,11 +259,6 @@ public sealed class EvidenceSession : IDisposable
 
     // ---------------- chấm + chụp ----------------
 
-    /// <summary>
-    /// Chấm trạng thái VS. Lúc VS vừa dừng đúng 1 dòng cần chụp (<paramref name="fromEvent"/>) hoặc lúc bấm
-    /// chụp (<paramref name="refresh"/>) thì đặt lại Watch = đúng biến của dòng đó — không dư biến lần trước,
-    /// không thiếu, và VS phải tính lại giá trị — rồi cuộn cho label hiện ra.
-    /// </summary>
     public CheckResult? Recheck(bool fromEvent = false, bool refresh = false)
     {
         if (!_active || _stops.Count == 0) return null;
@@ -295,8 +273,6 @@ public sealed class EvidenceSession : IDisposable
         if (fromEvent && !hit.InBreakMode) return null;   // chưa tới lúc, im lặng
         if (fromEvent) _pendingBypass = null;              // đã chạy tới chỗ khác: ô giá trị của dòng if hết hiệu lực
 
-        // Đang dừng ở dòng nào trong nhóm; không khớp dòng nào thì so với dòng chưa chụp đầu tiên để báo sai dòng.
-        // if + goto cùng dòng: stop khớp đúng cột breakpoint vừa dừng được ưu tiên, rồi mới tới stop theo dòng (cột 0).
         var open = Enumerable.Range(0, _stops.Count).Where(i => !_done.Contains(i) && IsAt(_stops[i], hit)).ToList();
         _currentStop = open.FirstOrDefault(i => _stops[i].Column > 0 && _stops[i].Column == hit.HitColumn,
                            open.FirstOrDefault(i => _stops[i].Column == 0, -1));
@@ -367,8 +343,6 @@ public sealed class EvidenceSession : IDisposable
         }
         _confirmed = null;
 
-        // Không lưu PNG: ảnh vào thẳng clipboard để dán vào tài liệu bằng chứng.
-        // Ẩn thanh nổi + dời chuột ra ngoài vùng trước khi chụp để ảnh không dính thanh / tooltip.
         var shot = ScreenCapture.GrabClean(region, _settings, _bar);
         if (!shot.Ok)
         {
@@ -387,8 +361,6 @@ public sealed class EvidenceSession : IDisposable
         Beep(StripState.Ok);
         _host.Log($"Chụp XONG {TcId} · {Path.GetFileName(stop.File)}:{stop.Line} → clipboard (Ctrl+V để dán).");
 
-        // Mệnh đề if: đã chụp giá trị thật → set cho mệnh đề ĐÚNG để F5 đi vào nhánh (ảnh sau ở lệnh đầu nhánh).
-        // Làm trước khi đưa Excel lên; app KHÔNG tự chạy tiếp. Giá trị sửa được ở ô trên thanh.
         string? bypassNote = null;
         var bypassState = StripState.Pending;
         _pendingBypass = null;
@@ -404,7 +376,6 @@ public sealed class EvidenceSession : IDisposable
         }
 
         bool all = _done.Count == _stops.Count;
-        // Chưa đủ nhóm: nhắc dán ảnh này trước (clipboard chỉ giữ 1 ảnh) rồi mới F5 trong VS — app không tự chạy tiếp.
         _bar.SetPair(_cmdLabel, _items, all
             ? $"✓ đủ {_stops.Count} ảnh — copy test case tiếp"
             : $"Ctrl+V rồi F5 trong VS → {TargetText(_stops, NextStop())}");
@@ -412,11 +383,9 @@ public sealed class EvidenceSession : IDisposable
         if (_pendingBypass is { } pending) _bar.AskValue(pending.Bypass.Var, pending.Bypass.Value);   // sau SetPair (SetPair ẩn ô)
         if (bypassNote != null) Beep(bypassState);
 
-        // Đưa lại cửa sổ vừa copy (Excel) để Ctrl+V luôn.
         if (_sourceWindow != IntPtr.Zero) SetForegroundWindow(_sourceWindow);
     }
 
-    /// <summary>Chạy lệnh set (mẫu IfSetStatement trong settings) cho mệnh đề if rồi kiểm mệnh đề = true. Trả câu báo + màu; null = ổn.</summary>
     (string? Note, StripState State) ApplyBypass(StopPoint stop, IfBypass bypass)
     {
         var statement = IfClause.Statement(_settings.IfSetStatement, bypass);
@@ -426,7 +395,6 @@ public sealed class EvidenceSession : IDisposable
         return (null, StripState.Pending);
     }
 
-    /// <summary>Enter trong ô giá trị trên thanh: chạy lại lệnh set với giá trị mới rồi kiểm lại mệnh đề.</summary>
     void OnValueSubmitted(string value)
     {
         if (!_active || _pendingBypass is not { } pending || value.Length == 0) return;
@@ -437,9 +405,6 @@ public sealed class EvidenceSession : IDisposable
         Beep(note != null ? state : StripState.Ok);
     }
 
-    // ---------------- trợ giúp ----------------
-
-    /// <summary>Phần sau mũi tên trên thanh, vd "rc, tax · Program.cs:42 · 1/2".</summary>
     static string TargetText(IReadOnlyList<StopPoint> stops, int index)
     {
         if (stops.Count == 0) return "";
@@ -471,7 +436,6 @@ public sealed class EvidenceSession : IDisposable
         => hit.HitLine == s.Line && hit.HitFile.Length > 0 &&
            string.Equals(Path.GetFullPath(hit.HitFile), Path.GetFullPath(s.File), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Không tự điền được Watch: để sẵn biểu thức trong clipboard cho dev dán tay.</summary>
     void CopyForManualWatch(IReadOnlyList<string> exprs)
     {
         if (exprs.Count == 0) return;
@@ -510,7 +474,6 @@ public sealed class EvidenceSession : IDisposable
         _ => StripState.Block,
     };
 
-    // Phản hồi bằng âm thanh: mắt dev đang ở VS hoặc Excel, không ở thanh này.
     static void Beep(StripState state)
     {
         switch (state)
@@ -528,20 +491,9 @@ public sealed class EvidenceSession : IDisposable
     }
 }
 
-// ==================== EvidenceBarForm ====================
 
 public enum StripState { Idle, Pending, Ok, Confirm, Block }
 
-/// <summary>
-/// Thanh nổi 1 dòng, luôn trên cùng trong lúc chụp bằng chứng:
-///   ●  CHECK_INPUT 「%RC%」「%TAX%」  →  rc, tax · Program.cs:42 · 1/2
-/// Màu chấm (và viền thanh): xám = chờ copy · xanh dương = chờ chương trình dừng ở breakpoint · xanh lá = chụp được · vàng = ⚠ · đỏ = ❌.
-/// Dòng 2 chỉ hiện khi vàng/đỏ, đúng 1 câu lý do. Chưa có mapping thì ô nhập C# hiện ngay sau mũi tên
-/// (ca goto chỉ 1 ô csharpLabel); Enter = <see cref="InputSubmitted"/>.
-/// Không cướp focus khi hiện/cập nhật — chỉ lấy focus lúc cần gõ C# (<see cref="AskInput"/>); ô sửa giá trị SET
-/// của mệnh đề if (<see cref="AskValue"/>) KHÔNG lấy focus.
-/// Kéo thanh ở bất kỳ chỗ nào trừ ô nhập; double-click = mở cửa sổ cấu hình.
-/// </summary>
 public sealed class EvidenceBarForm : Form
 {
     const int BarWidth = 640;   // đơn vị 96-dpi, quy đổi theo màn hình lúc hiện
@@ -607,15 +559,20 @@ public sealed class EvidenceBarForm : Form
 
         var line1 = new FlowLayoutPanel
         {
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false,
-            Margin = new Padding(0), BackColor = Theme.PanelBackground,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = new Padding(0),
+            BackColor = Theme.PanelBackground,
         };
         line1.Controls.AddRange(new Control[] { _dot, _cmd, _arrow, _target, _valueName, _value, _csLabel, _csVar });
 
         _body = new TableLayoutPanel
         {
-            ColumnCount = 1, Dock = DockStyle.Fill,
-            Padding = new Padding(10, 4, 12, 4), BackColor = Theme.PanelBackground,
+            ColumnCount = 1,
+            Dock = DockStyle.Fill,
+            Padding = new Padding(10, 4, 12, 4),
+            BackColor = Theme.PanelBackground,
         };
         _body.Controls.Add(line1, 0, 0);
         _body.Controls.Add(_reason, 0, 1);
@@ -638,10 +595,6 @@ public sealed class EvidenceBarForm : Form
         Fit();
     }
 
-    /// <summary>
-    /// Chia chiều ngang dòng 1 (ô target / 2 ô nhập ăn phần còn trống) rồi đặt chiều cao theo nội dung —
-    /// form không AutoSize vì khung Dock=Fill không báo lên khi dòng 2 bật/tắt.
-    /// </summary>
     void Fit()
     {
         if (!IsHandleCreated) return;   // OnLoad sẽ gọi lại
@@ -668,9 +621,6 @@ public sealed class EvidenceBarForm : Form
         ClientSize = new Size(ClientSize.Width, h + Padding.Vertical);
     }
 
-    // ---------------- API cho EvidenceSession ----------------
-
-    /// <summary>Cái vừa copy + đích đã tra (vd "rc, tax · Program.cs:42 · 1/2"). Gọi hàm này cũng ẩn ô nhập.</summary>
     public void SetPair(string cmdLabel, IReadOnlyList<string> cmdItems, string target)
     {
         var cmd = $"{cmdLabel} {string.Concat(cmdItems.Select(i => $"「{i}」"))}".Trim();
@@ -682,10 +632,6 @@ public sealed class EvidenceBarForm : Form
         SetInputVisible(false);
     }
 
-    /// <summary>
-    /// Hiện ô nhập C# ngay sau mũi tên (labelOnly = ca goto: chỉ 1 ô csharpLabel), lấy focus vào ô trống đầu tiên.
-    /// <paramref name="forItem"/> là 「」 đang thiếu mapping, hiện làm gợi ý trong ô.
-    /// </summary>
     public void AskInput(bool labelOnly, string forItem, string csLabel, string csVar)
     {
         _valueName.Visible = _value.Visible = false;
@@ -698,11 +644,6 @@ public sealed class EvidenceBarForm : Form
         box.SelectionStart = box.TextLength;
     }
 
-    /// <summary>
-    /// Hiện ô sửa giá trị đã SET cho mệnh đề if, vd "RC = [1]"; Enter = <see cref="ValueSubmitted"/>.
-    /// KHÔNG lấy focus: hàm này được gọi ngay sau khi chụp, lúc app vừa đưa Excel lên cho dev Ctrl+V —
-    /// lấy focus thì Ctrl+V sẽ dán vào ô này. Muốn sửa giá trị thì click vào ô.
-    /// </summary>
     public void AskValue(string varName, string value)
     {
         _valueName.Text = $"{varName} =";
@@ -711,7 +652,6 @@ public sealed class EvidenceBarForm : Form
         Fit();
     }
 
-    /// <summary>reason chỉ hiện ở dòng 2 khi state là Confirm/Block; null/rỗng = không hiện dòng 2.</summary>
     public void SetStatus(StripState state, string? reason)
     {
         _state = state;
@@ -719,8 +659,8 @@ public sealed class EvidenceBarForm : Form
         bool show = (state is StripState.Confirm or StripState.Block) && !string.IsNullOrWhiteSpace(reason);
         _reason.Text = show ? (state == StripState.Block ? "❌  " : "⚠  ") + reason : "";
         _reason.Visible = show;
-        Fit();          // dòng 2 bật/tắt thì đổi chiều cao
-        Invalidate();   // viền đổi màu theo chấm
+        Fit();
+        Invalidate();
     }
 
     public void PlaceAt(int? x, int? y)
@@ -735,7 +675,6 @@ public sealed class EvidenceBarForm : Form
         Location = new Point(screen.X + (screen.Width - Width) / 2, screen.Y + 8);
     }
 
-    // ---------------- bên trong ----------------
 
     void FillInput(bool labelOnly, string forItem, string csLabel, string csVar)
     {
@@ -792,12 +731,6 @@ public sealed class EvidenceBarForm : Form
     }
 }
 
-// ==================== ClipboardWatcher ====================
-
-/// <summary>
-/// Nghe clipboard bằng WM_CLIPBOARDUPDATE (không polling) để bắt cái vừa copy từ Excel.
-/// Cửa sổ vô hình, giống HotkeyWindow.
-/// </summary>
 public sealed class ClipboardWatcher : NativeWindow, IDisposable
 {
     const int WM_CLIPBOARDUPDATE = 0x031D;

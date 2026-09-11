@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Encodings.Web;
@@ -16,8 +15,6 @@ static class Program
     [STAThread]
     static void Main()
     {
-        // Chỉ cho chạy 1 bản: bản thứ hai không đăng ký được hotkey toàn cục (bản đầu đang giữ)
-        // và sẽ chết lặng lẽ — thay vì thế, đưa cửa sổ bản đang chạy lên rồi thoát.
         using var single = new Mutex(true, @"Local\SendKeyDemo.SingleInstance", out bool isFirst);
         if (!isFirst)
         {
@@ -40,7 +37,6 @@ static class Program
             return;
         }
 
-        // Bản kia đang thu về tray (không có cửa sổ) -> báo cho biết, đừng im lặng không phản hồi.
         MessageBox.Show(
             "SendKey Evidence đang chạy sẵn ở khay hệ thống (góc dưới-phải, có thể phải bấm mũi tên \"^\").\n\n" +
             "Double-click icon đó để mở cửa sổ.",
@@ -48,12 +44,6 @@ static class Program
     }
 }
 
-// ==================== AppSettings ====================
-
-/// <summary>
-/// Cấu hình chung cho cả 2 nửa của app: tra mapping / đặt breakpoint (SendKeyDemo cũ)
-/// và chụp màn hình theo hotkey (QuickShot cũ). Một file settings.json cạnh .exe.
-/// </summary>
 public sealed class AppSettings
 {
     // ---- nửa mapping ----
@@ -68,19 +58,13 @@ public sealed class AppSettings
     public string ActiveWindowHotkey { get; set; } = "Ctrl+Shift+W";
     public string SaveFolder { get; set; } = @"C:\Temp\shot";
 
-    // Kích thước cố định (inch) áp cho ảnh vào Clipboard, để dán vào Excel/SharePoint ra đúng
-    // Width/Height mong muốn mà không phải kéo tay. 0 = giữ nguyên kích thước gốc.
     public double ClipboardWidthInches { get; set; } = 0;
     public double ClipboardHeightInches { get; set; } = 0;
 
-    // ---- chế độ chụp bằng chứng ----
-    /// <summary>Hotkey đặt breakpoint cho cặp đang hiện trên thanh chụp.</summary>
     public string GotoCurrentHotkey { get; set; } = "Ctrl+Shift+G";
 
-    /// <summary>Lệnh ép mệnh đề if ĐÚNG, chạy ngay sau khi chụp ảnh ở dòng if. {var} = tên biến batch bỏ %, {value} = giá trị.</summary>
     public string IfSetStatement { get; set; } = "SET(\"{var}\", \"{value}\")";
 
-    /// <summary>Vị trí thanh trạng thái mỏng người dùng đã kéo tới; null = canh giữa mép trên.</summary>
     public int? StripX { get; set; }
     public int? StripY { get; set; }
 
@@ -90,7 +74,6 @@ public sealed class AppSettings
     {
         bool firstRun = !File.Exists(DefaultPath);
         var s = Load(DefaultPath);
-        // Lần đầu chạy: ghi ra file mặc định để người dùng có chỗ sửa hotkey / SaveFolder.
         if (firstRun) s.Save();
         return s;
     }

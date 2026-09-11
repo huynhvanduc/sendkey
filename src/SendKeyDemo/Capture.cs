@@ -23,17 +23,13 @@ public static class ScreenCapture
     [StructLayout(LayoutKind.Sequential)]
     struct RECT { public int Left, Top, Right, Bottom; }
 
-    /// <summary>Màn hình đang chứa con trỏ chuột (hỗ trợ nhiều màn hình).</summary>
     public static Rectangle CursorScreenBounds() => Screen.FromPoint(Cursor.Position).Bounds;
 
-    /// <summary>Khung cửa sổ đang active; null nếu không có cửa sổ hợp lệ (desktop / đang thu nhỏ).</summary>
     public static Rectangle? ActiveWindowBounds()
     {
         IntPtr hWnd = GetForegroundWindow();
         if (hWnd == IntPtr.Zero || IsIconic(hWnd)) return null;
 
-        // Ưu tiên DWM extended frame bounds: khớp viền nhìn thấy được, tránh phần viền ẩn
-        // mà GetWindowRect cộng thêm ở cửa sổ maximized.
         bool got = DwmGetWindowAttribute(hWnd, DWMWA_EXTENDED_FRAME_BOUNDS, out var r, Marshal.SizeOf<RECT>()) == 0
                    || GetWindowRect(hWnd, out r);
         if (!got) return null;
@@ -42,10 +38,6 @@ public static class ScreenCapture
         return rect.Width > 0 && rect.Height > 0 ? rect : null;
     }
 
-    /// <summary>
-    /// Chụp <paramref name="region"/> vào Clipboard. <paramref name="saveFile"/> = true thì lưu thêm PNG
-    /// vào thư mục cấu hình (chụp bằng chứng không lưu file — dán thẳng vào tài liệu).
-    /// </summary>
     public static Result Grab(Rectangle region, AppSettings settings, bool saveFile, bool showFlyout = true)
     {
         if (region.Width <= 0 || region.Height <= 0)
@@ -81,11 +73,6 @@ public static class ScreenCapture
         }
     }
 
-    /// <summary>
-    /// Chụp bằng chứng "sạch": ẩn <paramref name="hide"/> (thanh nổi) và dời chuột ra ngoài vùng chụp để
-    /// ảnh không dính thanh nổi hay tooltip giá trị biến của VS, đợi màn hình vẽ lại rồi mới chụp.
-    /// Xong trả chuột + thanh về như cũ.
-    /// </summary>
     public static Result GrabClean(Rectangle region, AppSettings settings, Form? hide)
     {
         var cursor = Cursor.Position;
@@ -104,7 +91,6 @@ public static class ScreenCapture
         }
     }
 
-    // Một điểm ngay ngoài vùng chụp (phải / trái / dưới / trên) mà vẫn nằm trên một màn hình thật.
     static Point OutsidePoint(Rectangle region)
     {
         var r = Rectangle.Inflate(region, 40, 40);
@@ -116,10 +102,6 @@ public static class ScreenCapture
         return new Point(vs.Right - 1, vs.Bottom - 1);   // vùng chụp phủ kín mọi màn hình — đành ra góc
     }
 
-    /// <summary>
-    /// Khung cỡ cố định <paramref name="size"/> đặt tâm tại <paramref name="center"/>, đẩy vào trong
-    /// <paramref name="bounds"/> (màn hình đang trỏ) để không tràn ra ngoài.
-    /// </summary>
     public static Rectangle PlaceFixed(Point center, Size size, Rectangle bounds)
     {
         int x = center.X - size.Width / 2, y = center.Y - size.Height / 2;
@@ -128,7 +110,6 @@ public static class ScreenCapture
         return new Rectangle(x, y, size.Width, size.Height);
     }
 
-    // Clipboard hay bận vì app khác đang giữ (Excel, trình duyệt) -> thử lại vài nhịp thay vì ném ngay.
     static void SetClipboardImage(Bitmap bmp)
     {
         for (int attempt = 0; ; attempt++)
@@ -138,8 +119,6 @@ public static class ScreenCapture
         }
     }
 
-    // Kéo đúng ClipboardWidth/HeightInches (quy đổi pixel) nếu đã cấu hình, kể cả méo tỷ lệ,
-    // để dán vào Excel/SharePoint ra sẵn đúng cỡ. Chưa cấu hình thì giữ nguyên gốc.
     static Bitmap BuildClipboardImage(Bitmap original, AppSettings settings)
     {
         if (settings.ClipboardPixelSize is not { } size) return new Bitmap(original);
@@ -154,13 +133,6 @@ public static class ScreenCapture
 
 // ==================== RegionSelector ====================
 
-/// <summary>
-/// Overlay phủ TOÀN BỘ các màn hình (virtual screen): nền tối có vignette nhẹ (đậm
-/// dần ra rìa) thay vì màu đen phẳng, fade-in nhanh lúc mở, cho user kéo chuột chọn
-/// một khung chữ nhật viền gradient. Trả về Rectangle theo tọa độ màn hình thật.
-/// Có <c>fixedSize</c> (từ ClipboardWidth/HeightInches) thì không kéo tự do: khung đúng cỡ chạy theo
-/// chuột, click để chốt — ảnh bằng chứng luôn cùng một cỡ, dán vào Excel không bị méo.
-/// </summary>
 public sealed class RegionSelector : Form
 {
     private const int FadeInMs = 120;
@@ -176,7 +148,6 @@ public sealed class RegionSelector : Form
 
     private readonly Size? _fixedSize;   // null = kéo tự do
 
-    // Kết quả: null nếu user hủy (Esc / click không kéo / click phải)
     public Rectangle? Result { get; private set; }
 
     public RegionSelector(Size? fixedSize = null)
@@ -218,9 +189,6 @@ public sealed class RegionSelector : Form
         _fadeTimer.Start();
     }
 
-    // Vẽ 1 lần lúc mở: PathGradientBrush tâm sáng hơn rìa một chút. Vì cả overlay
-    // đã bị Opacity của Form nhân xuống ~0.42 nên chênh lệch RGB ở đây vẫn giữ được
-    // cảm giác "đậm dần ra rìa" chứ không cần alpha khác nhau theo từng điểm.
     private static Brush BuildVignetteBrush(Rectangle bounds)
     {
         using var path = new GraphicsPath();
@@ -233,7 +201,6 @@ public sealed class RegionSelector : Form
         };
     }
 
-    // Khung cỡ cố định chạy theo chuột, không tràn ra khỏi màn hình đang trỏ.
     private void PlaceFrame(Point client)
     {
         var screen = RectangleToClient(Screen.FromPoint(PointToScreen(client)).Bounds);
@@ -347,19 +314,7 @@ public sealed class RegionSelector : Form
     }
 }
 
-// ==================== CaptureFlyoutForm ====================
 
-/// <summary>
-/// Hiệu ứng sau khi chụp: viền gradient lóe lên (fade-in) đúng khung vùng vừa chụp để
-/// xác nhận, rồi ảnh co dần về một khung nhỏ ở góc dưới-phải màn hình (ease-out cubic),
-/// "thở" bằng glow nhẹ trong lúc giữ, phóng to khi rê chuột vào (tạm dừng đếm giờ mờ dần),
-/// rồi tự mờ dần biến mất. Click lúc đang giữ để mở file ảnh đã lưu.
-///
-/// Vẽ thủ công qua layered window (UpdateLayeredWindow) thay vì BackgroundImage/Opacity
-/// mặc định của Form: mỗi frame chỉ có 1 lệnh set vị trí+kích thước+nội dung, rẻ hơn
-/// nhiều so với SetWindowPos + WM_PAINT riêng lẻ — đây là nguyên nhân chính gây giật đo
-/// được ở bản trước (frame-time 7-45ms thay vì đều ~15ms).
-/// </summary>
 public sealed class CaptureFlyoutForm : Form
 {
     private const int HighlightFadeMs = 150;
@@ -384,9 +339,9 @@ public sealed class CaptureFlyoutForm : Form
     private readonly System.Windows.Forms.Timer _timer;
     private readonly Stopwatch _stopwatch = new();
 
-    private Bitmap? _original;    // ảnh full-res: Highlight (1:1, không cần scale) + nguồn cho hover-zoom
-    private Bitmap? _smallSource; // prescale ~2x kích thước nghỉ, dùng cho Fly/Hold — rẻ để scale lại mỗi tick
-    private Bitmap? _hoverSource; // prescale đúng kích thước hover, dựng lười lúc hover lần đầu
+    private Bitmap? _original;
+    private Bitmap? _smallSource;
+    private Bitmap? _hoverSource;
 
     private Phase _phase = Phase.Highlight;
     private bool _isHovered;
@@ -434,7 +389,6 @@ public sealed class CaptureFlyoutForm : Form
         return new Rectangle(wa.Right - w - EdgeMargin, wa.Bottom - h - EdgeMargin, w, h);
     }
 
-    // Phóng to neo tại góc dưới-phải (điểm cố định của thumbnail) để không tràn ra ngoài màn hình.
     private static Rectangle ComputeHoverBounds(Rectangle rest)
     {
         int w = (int)(rest.Width * HoverScale);
@@ -546,66 +500,66 @@ public sealed class CaptureFlyoutForm : Form
         switch (_phase)
         {
             case Phase.Highlight:
-            {
-                bounds = _startBounds;
-                frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
-                using var g = Graphics.FromImage(frame);
-                g.DrawImageUnscaled(_original, 0, 0);
-                double t = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / (double)HighlightFadeMs);
-                DrawHighlightBorder(g, bounds, (float)t);
-                break;
-            }
+                {
+                    bounds = _startBounds;
+                    frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
+                    using var g = Graphics.FromImage(frame);
+                    g.DrawImageUnscaled(_original, 0, 0);
+                    double t = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / (double)HighlightFadeMs);
+                    DrawHighlightBorder(g, bounds, (float)t);
+                    break;
+                }
 
             case Phase.Fly:
-            {
-                double t = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / (double)FlyMs);
-                double eased = Theme.EaseOutCubic(t);
-                bounds = Lerp(_startBounds, _restBounds, eased);
-                frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
-                using var g = Graphics.FromImage(frame);
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                DrawClippedContent(g, _smallSource, bounds);
+                {
+                    double t = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / (double)FlyMs);
+                    double eased = Theme.EaseOutCubic(t);
+                    bounds = Lerp(_startBounds, _restBounds, eased);
+                    frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
+                    using var g = Graphics.FromImage(frame);
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                    DrawClippedContent(g, _smallSource, bounds);
 
-                // Cross-fade: viền highlight mờ dần trong 100ms đầu, viền glow của thumbnail hiện dần thay thế
-                // — thay cho cú cắt cứng Invalidate() ở bản trước.
-                double crossT = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / 100.0);
-                if (crossT < 1.0)
-                    DrawHighlightBorder(g, new Rectangle(0, 0, bounds.Width, bounds.Height), (float)(1 - crossT));
-                Theme.DrawGlowBorder(g, new RectangleF(1, 1, bounds.Width - 2, bounds.Height - 2), CornerRadius, (float)crossT);
-                break;
-            }
+                    // Cross-fade: viền highlight mờ dần trong 100ms đầu, viền glow của thumbnail hiện dần thay thế
+                    // — thay cho cú cắt cứng Invalidate() ở bản trước.
+                    double crossT = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / 100.0);
+                    if (crossT < 1.0)
+                        DrawHighlightBorder(g, new Rectangle(0, 0, bounds.Width, bounds.Height), (float)(1 - crossT));
+                    Theme.DrawGlowBorder(g, new RectangleF(1, 1, bounds.Width - 2, bounds.Height - 2), CornerRadius, (float)crossT);
+                    break;
+                }
 
             case Phase.Hold:
-            {
-                bounds = Lerp(_restBounds, _hoverBounds, Theme.EaseOutQuad(_hoverT));
-                var source = _hoverT > 0.01 && _hoverSource != null ? _hoverSource : _smallSource;
-                frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
-                using var g = Graphics.FromImage(frame);
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                DrawClippedContent(g, source, bounds);
+                {
+                    bounds = Lerp(_restBounds, _hoverBounds, Theme.EaseOutQuad(_hoverT));
+                    var source = _hoverT > 0.01 && _hoverSource != null ? _hoverSource : _smallSource;
+                    frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
+                    using var g = Graphics.FromImage(frame);
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                    DrawClippedContent(g, source, bounds);
 
-                double pulse = (Math.Sin(_stopwatch.ElapsedMilliseconds / (double)PulsePeriodMs * 2 * Math.PI) + 1) / 2;
-                float glowIntensity = _hoverT > 0.01 ? 1.0f : (float)(0.35 + 0.35 * pulse);
-                Theme.DrawGlowBorder(g, new RectangleF(1, 1, bounds.Width - 2, bounds.Height - 2), CornerRadius, glowIntensity);
-                break;
-            }
+                    double pulse = (Math.Sin(_stopwatch.ElapsedMilliseconds / (double)PulsePeriodMs * 2 * Math.PI) + 1) / 2;
+                    float glowIntensity = _hoverT > 0.01 ? 1.0f : (float)(0.35 + 0.35 * pulse);
+                    Theme.DrawGlowBorder(g, new RectangleF(1, 1, bounds.Width - 2, bounds.Height - 2), CornerRadius, glowIntensity);
+                    break;
+                }
 
             case Phase.Fade:
             default:
-            {
-                bounds = _restBounds;
-                double t = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / (double)FadeMs);
-                opacity = 1.0 - Theme.EaseInCubic(t);
-                frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
-                using var g = Graphics.FromImage(frame);
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                DrawClippedContent(g, _smallSource, bounds);
-                Theme.DrawGlowBorder(g, new RectangleF(1, 1, bounds.Width - 2, bounds.Height - 2), CornerRadius, 0.5f);
-                break;
-            }
+                {
+                    bounds = _restBounds;
+                    double t = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / (double)FadeMs);
+                    opacity = 1.0 - Theme.EaseInCubic(t);
+                    frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
+                    using var g = Graphics.FromImage(frame);
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                    DrawClippedContent(g, _smallSource, bounds);
+                    Theme.DrawGlowBorder(g, new RectangleF(1, 1, bounds.Width - 2, bounds.Height - 2), CornerRadius, 0.5f);
+                    break;
+                }
         }
 
         if (opacity < 1.0) ApplyOpacity(frame, opacity);
@@ -637,8 +591,6 @@ public sealed class CaptureFlyoutForm : Form
         g.DrawPath(pen, path);
     }
 
-    // Nhân alpha toàn frame theo opacity — cần cho pha Fade vì UpdateLayeredWindow không
-    // có tham số "opacity toàn cục" riêng như Form.Opacity, phải áp trực tiếp vào từng pixel.
     private static void ApplyOpacity(Bitmap frame, double opacity)
     {
         var rect = new Rectangle(0, 0, frame.Width, frame.Height);
@@ -819,10 +771,6 @@ internal static class LayeredSurface
 
 // ==================== Theme ====================
 
-/// <summary>
-/// Bảng màu + helper vẽ dùng chung cho toàn bộ UI: nền tối, accent gradient
-/// xanh dương -> tím, và các easing curve cho hoạt cảnh.
-/// </summary>
 internal static class Theme
 {
     public static readonly Color AccentStart = Color.FromArgb(59, 130, 246);   // #3B82F6
@@ -855,8 +803,6 @@ internal static class Theme
         return path;
     }
 
-    // Viền glow mềm: nhiều lớp rounded-rect càng ra ngoài càng mờ, mô phỏng blur
-    // mà không cần bitmap blur thật (đắt hơn nhiều lần cho một hoạt cảnh chạy mỗi tick).
     public static void DrawGlowBorder(Graphics g, RectangleF rect, float radius, float intensity, int layers = 4, float maxSpread = 6f)
     {
         if (rect.Width < 2 || rect.Height < 2 || intensity <= 0) return;
@@ -885,12 +831,6 @@ internal static class Theme
 
 // ==================== Native ====================
 
-/// <summary>
-/// P/Invoke tối thiểu cho UpdateLayeredWindow — dùng để đẩy bitmap có alpha
-/// thật (per-pixel) lên cửa sổ, thay vì Form.Opacity (chỉ chỉnh được alpha
-/// đều cho toàn form) hoặc BackgroundImage (không hỗ trợ alpha + kéo theo
-/// chi phí resize/repaint qua SetWindowPos mỗi tick).
-/// </summary>
 internal static class Native
 {
     [StructLayout(LayoutKind.Sequential)]

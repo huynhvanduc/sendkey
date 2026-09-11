@@ -1,7 +1,7 @@
+using EnvDTE;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Text.RegularExpressions;
-using EnvDTE;
 using UIA = System.Windows.Automation;
 
 namespace SendKeyDemo;
@@ -68,10 +68,6 @@ public static class VsAutomation
             : $"đã tới {Path.GetFileName(file)}:{reached} (file chỉ có {reached} dòng)";
     }
 
-    /// <summary>
-    /// Mở đúng tab file .cs, đặt con trỏ ở dòng dừng và cuộn cho dòng label nằm đầu vùng nhìn (ảnh chụp
-    /// phải thấy label cần kiểm chứng), rồi đưa VS lên trước. Trả false nếu cuộn rồi vẫn không thấy label.
-    /// </summary>
     public static bool ShowLabel(DTE dte, string file, int labelLine, int stopLine)
     {
         var win = dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView);
@@ -131,7 +127,6 @@ public static class VsAutomation
             : $"đã xóa {n} breakpoint ở {Path.GetFileName(file)}";
     }
 
-    /// <summary>Đặt breakpoint nếu chưa có. <paramref name="column"/> > 0: breakpoint theo cột (vd `goto` nằm cùng dòng với `if`).</summary>
     public static string EnsureBreakpoint(DTE dte, string file, int line, int column = 0)
     {
         if (!File.Exists(file)) return $"file không tồn tại: {file}";
@@ -154,7 +149,6 @@ public static class VsAutomation
         return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
     }
 
-    /// <summary>Xóa mọi breakpoint trong file rồi đặt đúng 1 cái ở <paramref name="line"/> — dùng cho chế độ chụp.</summary>
     public static string SetOnlyBreakpoint(DTE dte, string file, int line)
     {
         if (!File.Exists(file)) return $"file không tồn tại: {file}";
@@ -162,9 +156,6 @@ public static class VsAutomation
         return EnsureBreakpoint(dte, file, line);
     }
 
-    /// <summary>
-    /// Đọc trạng thái debugger để gác cổng trước khi chụp. Toàn read-only, không đổi gì phía VS.
-    /// </summary>
     public static DebugSnapshot ReadDebugState(DTE dte, string csFile, IReadOnlyList<string> exprs)
     {
         try
@@ -230,11 +221,6 @@ public static class VsAutomation
         }
     }
 
-    /// <summary>
-    /// Bám sự kiện VS dừng ở breakpoint để tự chấm mà không cần người dùng bấm gì.
-    /// QUAN TRỌNG: phải giữ instance này trong một field — thả ra là GC dọn mất
-    /// đối tượng events và sự kiện im lặng ngừng bắn.
-    /// </summary>
     public sealed class BreakWatcher : IDisposable
     {
         readonly DebuggerEvents _events;                                        // giữ tham chiếu, đừng để GC dọn
@@ -257,10 +243,6 @@ public static class VsAutomation
     // Watch window kind GUID (EnvDTE.Constants.vsWindowKindWatch)
     const string WatchWindowKind = "{90243340-BD7A-11D0-93EF-00A0C90F2734}";
 
-    /// <summary>
-    /// Copy biểu thức vào clipboard và mở/kích hoạt cửa sổ Watch. KHÔNG gõ phím tự động:
-    /// SendKeys gõ mù có thể rơi vào editor và sửa file .cs. Người dùng bấm Ctrl+V rồi Enter.
-    /// </summary>
     public static string AddWatch(DTE dte, string expression)
     {
         if (string.IsNullOrWhiteSpace(expression)) return "biểu thức trống";
@@ -288,14 +270,7 @@ public static class VsAutomation
             : $"không copy được clipboard — tự gõ \"{expression}\" vào cửa sổ Watch.";
     }
 
-    // Cố ý KHÔNG có hàm chạy / chạy tiếp debug: user mở tool khi chương trình ĐANG debug sẵn, app không được
-    // tự Start hay khởi động lại phiên debug (user yêu cầu 2026-09-11).
 
-    /// <summary>
-    /// Ép mệnh đề if ĐÚNG sau khi đã chụp giá trị thật ở dòng if: chạy <paramref name="statement"/> (vd SET("RC", "1"))
-    /// ở frame đang dừng rồi kiểm <paramref name="condition"/> = true. KHÔNG chạy tiếp — dev tự F5 để vào nhánh.
-    /// Trả câu lỗi, hoặc null nếu mệnh đề đã đúng.
-    /// </summary>
     public static string? RunIfBypass(DTE dte, string statement, string condition)
     {
         var dbg = dte.Debugger;
@@ -315,26 +290,12 @@ public static class VsAutomation
 
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
 
-    /// <summary>
-    /// Đưa cửa sổ VS lên trước. Gọi từ app ngay sau khi nhận phím tắt — lúc đó Windows cho app đổi cửa sổ
-    /// foreground; còn MainWindow.Activate là VS tự gọi nên thường chỉ nhấp nháy trên taskbar.
-    /// </summary>
     public static void BringToFront(DTE dte)
     {
         var hwnd = new IntPtr(dte.MainWindow.HWnd);
         if (hwnd != IntPtr.Zero) SetForegroundWindow(hwnd);
     }
 
-    // ---- Watch tự điền: không gõ phím nào vào VS ----
-    // Đã thử trên VS 2022: Debug.AddWatch KHÔNG nhận tham số — nó lấy chữ đang bôi đen trong editor, và editor
-    // phải đang active (focus ở Watch thì VS nhân bản dòng watch đang chọn). Chỉ chạy khi VS đang dừng.
-    // DTE không có API đọc/xoá Watch và ActiveWindow trả null khi Watch active, nên đọc/xoá qua UI Automation.
-
-    /// <summary>
-    /// Đặt Watch 1 = đúng <paramref name="exprs"/>: xoá hết dòng cũ, rồi thêm từng biểu thức bằng cách bôi đen nó
-    /// trong file .cs (tìm từ <paramref name="fromLine"/>, không thấy thì tìm cả file) và gọi Debug.AddWatch.
-    /// Trả về biểu thức không tự thêm được; null nếu không xoá được Watch cũ (hoặc VS chưa dừng).
-    /// </summary>
     public static List<string>? SetWatch(DTE dte, string file, int fromLine, IReadOnlyList<string> exprs)
     {
         if (dte.Debugger.CurrentMode != dbgDebugMode.dbgBreakMode) return null;
@@ -364,7 +325,6 @@ public static class VsAutomation
         return missed;
     }
 
-    /// <summary>Biểu thức các dòng đang có trong Watch 1; null nếu không đọc được.</summary>
     public static List<string>? ReadWatchNames(DTE dte)
     {
         try { return WatchTree(dte) is { } tree ? WatchItems(tree).Select(i => i.Current.Name).ToList() : null; }
@@ -385,10 +345,6 @@ public static class VsAutomation
                 new UIA.PropertyCondition(UIA.AutomationElement.ControlTypeProperty, UIA.ControlType.TreeItem))
             .Cast<UIA.AutomationElement>().ToList();
 
-    /// <summary>
-    /// Xoá từng dòng Watch: chọn dòng bằng UI Automation rồi Edit.Delete — CHỈ khi focus đang nằm trong cây Watch,
-    /// để lệnh Delete không bao giờ rơi vào editor. Mỗi lần xoá được 1 dòng nên lặp tới hết.
-    /// </summary>
     static bool ClearWatch(DTE dte, UIA.AutomationElement tree)
     {
         for (int guard = 0; guard < 100; guard++)
@@ -414,7 +370,6 @@ public static class VsAutomation
         return false;
     }
 
-    // ---- COM message filter: tự retry khi VS đang bận ----
     public static class OleMessageFilter
     {
         [DllImport("ole32.dll")]
@@ -424,14 +379,11 @@ public static class VsAutomation
 
         class Filter : IOleMessageFilter
         {
-            // SERVERCALL_ISHANDLED
             public int HandleInComingCall(int callType, IntPtr caller, int tickCount, IntPtr info) => 0;
 
-            // chỉ RETRYLATER (2) mới retry được; REJECTED (1) thì hủy luôn
             public int RetryRejectedCall(IntPtr callee, int tickCount, int rejectType)
                 => rejectType == 2 && tickCount < 10_000 ? 100 : -1;
 
-            // PENDINGMSG_WAITDEFPROCESS
             public int MessagePending(IntPtr callee, int tickCount, int pendingType) => 2;
         }
     }
@@ -445,21 +397,13 @@ public static class VsAutomation
         [PreserveSig] int MessagePending(IntPtr callee, int tickCount, int pendingType);
     }
 }
-
-// ==================== CaptureCheck ====================
-
-/// <summary>Mức gác cổng trước khi chụp bằng chứng.</summary>
 public enum CheckLevel
 {
-    /// <summary>Mọi thứ khớp — chụp thẳng.</summary>
     Ok,
-    /// <summary>Nghi chưa reset biến — hỏi lại rồi mới chụp.</summary>
     Confirm,
-    /// <summary>Sai thao tác cơ học — không chụp.</summary>
     Block,
 }
 
-/// <summary>Ảnh chụp trạng thái debugger của VS tại một thời điểm. Đọc bởi <see cref="VsAutomation.ReadDebugState"/>.</summary>
 public record DebugSnapshot(
     bool Available,
     bool InBreakMode,
@@ -477,18 +421,12 @@ public record DebugSnapshot(
         new(false, false, "", 0, 0, false, "", 0, error);
 }
 
-/// <summary>Lần chụp gần nhất — để phát hiện "giá trị y hệt lần trước, chưa reset".</summary>
 public record LastCapture(int ProcessId, string TcId, string Expr, string Value);
 
 public record CheckResult(CheckLevel Level, string Message);
 
-/// <summary>
-/// Chấm điểm "có được phép chụp bằng chứng không". Logic thuần, không đụng COM —
-/// nhận <see cref="DebugSnapshot"/> đã đọc sẵn nên test được.
-/// </summary>
 public static class CaptureCheck
 {
-    /// <summary>So hai giá trị debugger đọc được, bỏ qua nháy bao ngoài và hoa/thường.</summary>
     public static bool ValuesMatch(string? actual, string? expected)
         => string.Equals(Unquote(actual), Unquote(expected), StringComparison.OrdinalIgnoreCase);
 
@@ -500,10 +438,6 @@ public static class CaptureCheck
         return t.Trim();
     }
 
-    /// <summary>
-    /// So các dòng đang có trong Watch với biến cần chụp (bỏ qua khoảng trắng). Khớp → null;
-    /// lệch → "Watch thiếu …· dư …" (dòng lặp lại cũng tính là dư).
-    /// </summary>
     public static string? WatchMismatch(IReadOnlyList<string> inWatch, IReadOnlyList<string> expected)
     {
         static string Key(string s) => new(s.Where(c => !char.IsWhiteSpace(c)).ToArray());
@@ -523,10 +457,6 @@ public static class CaptureCheck
         => !string.IsNullOrEmpty(a) && !string.IsNullOrEmpty(b) &&
            string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Chặn cứng khi sai thao tác cơ học (chưa break / dừng nhầm dòng / không đọc được biểu thức);
-    /// chỉ hỏi lại khi nghi chưa reset biến. <paramref name="tcId"/> chỉ để ghi vào thông báo.
-    /// </summary>
     public static CheckResult Evaluate(
         DebugSnapshot s,
         string tcId,
