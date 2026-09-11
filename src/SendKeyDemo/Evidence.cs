@@ -34,6 +34,7 @@ public sealed class EvidenceSession : IDisposable
     List<string> _bpFiles = new();
     string? _confirmed;                      // lý do ⚠ đã báo — bấm chụp lần nữa mới ra ảnh
     IntPtr _sourceWindow;                    // cửa sổ lúc copy (Excel) — chụp xong đưa lên lại
+    (StopPoint Stop, IfBypass Bypass)? _pendingBypass;   // dòng if vừa chụp + giá trị đã set, sửa được ở ô trên thanh
 
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -43,6 +44,7 @@ public sealed class EvidenceSession : IDisposable
         _host = host;
         _settings = settings;
         _bar.InputSubmitted += OnInputSubmitted;
+        _bar.ValueSubmitted += OnValueSubmitted;
     }
 
     public bool Active => _active;
@@ -202,12 +204,7 @@ public sealed class EvidenceSession : IDisposable
             // Mệnh đề if: ảnh 1 ở dòng if (giá trị thật) → chụp xong app SET cho mệnh đề ĐÚNG → ảnh 2 ở lệnh đầu nhánh.
             if (gotoLabel == null && IfClause.IsIf(item) && Mapping.IsExpression(watch))
             {
-                var bypass = IfClause.Suggest(item);
-                targets[^1] = targets[^1] with
-                {
-                    SetStatement = bypass == null ? "" : IfClause.Statement(_settings.IfSetStatement, bypass),
-                    Condition = watch,
-                };
+                targets[^1] = targets[^1] with { Condition = watch };
                 if (Mapping.BranchStart(File.ReadAllLines(csp), ll.Line) is { } branch)
                     targets.Add(new StopTarget(csp, branch.Line, ll.LabelLine, watch, item, branch.Column));
                 else
@@ -296,6 +293,7 @@ public sealed class EvidenceSession : IDisposable
 
         var hit = VsAutomation.ReadDebugState(dte, "", Array.Empty<string>());
         if (fromEvent && !hit.InBreakMode) return null;   // chưa tới lúc, im lặng
+        if (fromEvent) _pendingBypass = null;              // đã chạy tới chỗ khác: ô giá trị của dòng if hết hiệu lực
 
         // Đang dừng ở dòng nào trong nhóm; không khớp dòng nào thì so với dòng chưa chụp đầu tiên để báo sai dòng.
         // if + goto cùng dòng: stop khớp đúng cột breakpoint vừa dừng được ưu tiên, rồi mới tới stop theo dòng (cột 0).

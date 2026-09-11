@@ -73,6 +73,16 @@ VS:     app xoá Watch cũ, thêm đúng biến của dòng đó, kiểm tra (di
   chạy tiếp, không khởi động lại.
 - `「goto :END_PROC」`: dừng ở dòng thực thi đầu tiên của label `END_PROC`, Watch để trống. Chưa có trong mapping thì
   chỉ phải gõ csharpLabel.
+- Mệnh đề if, vd `「if "%RC%" NEQ "0"」` (mapping sang `rc != 0`): **2 ảnh**.
+  1. Dừng ở dòng `if` → chụp, ảnh thấy giá trị THẬT của mệnh đề.
+  2. Chụp xong app chạy lệnh `IfSetStatement` trong `settings.json` (mặc định `SET("{var}", "{value}")`, `{var}` = tên
+     biến batch bỏ `%`) với giá trị gợi ý làm mệnh đề ĐÚNG, rồi kiểm lại mệnh đề. Lỗi thì báo đỏ.
+  3. Thanh nổi hiện ô giá trị, vd `RC = [1]`. Muốn giá trị khác thì click vào ô, sửa rồi Enter → app chạy lại lệnh set
+     với giá trị mới và kiểm lại mệnh đề. (VS không cho thêm dòng Watch tuỳ ý bằng code, nên ô sửa nằm trên thanh.)
+  4. Ctrl+V ảnh 1 vào Excel, F5 trong VS → dừng ở lệnh đầu của nhánh (cùng dòng thì theo cột `goto`) → chụp ảnh 2.
+
+  Giá trị gợi ý: `NEQ "0"` → `1`, `NEQ "x"` → `0`, `EQU`/`==` `"x"` → `x`, `GTR n` → n+1, `LSS n` → n−1, `GEQ`/`LEQ n` → n;
+  có `not` thì đảo lại. `if exist` / `if defined` / `if errorlevel` hoặc không nhận ra → báo vàng, tự set rồi F5.
 - Watch được điền bằng cách bôi đen biểu thức trong file `.cs` rồi gọi lệnh Add Watch của VS, không gõ phím. Biểu thức
   không có nguyên văn trong file thì app copy sẵn vào clipboard, bạn Ctrl+V vào Watch. Cần VS giao diện tiếng Anh
   (app tìm cửa sổ tên `Watch 1`).
@@ -143,6 +153,7 @@ App không bao giờ tự gõ phím vào VS, để khỏi gõ nhầm vào file `
 | 17 | Mở `mapping.csv` bằng Excel, lặp bước 16 với cặp khác | Báo đỏ `Không ghi được mapping.csv (đang mở trong Excel?)…` |
 | 18 | **Công cụ khác**: File = `Program.cs` của BigSample, Line = một dòng lệnh, bấm **Toggle Breakpoint** 2 lần | Breakpoint hiện ra rồi mất đi |
 | 19 | Khi đang dừng ở breakpoint: Watch = `rc`, bấm **Add Watch** | Cửa sổ Watch nổi lên, Ctrl+V ra `rc`; file `.cs` không bị sửa |
-| 20 | Copy `CHECK_INPUT`, rồi `「%INPUT_FILE%」「%RC%」` (1 lần), rồi `「if "%RC%" NEQ "0"」`, bấm `Ctrl+Shift+G` | 2 breakpoint (dòng 36, 39); thanh `inputFile, rc · Program.cs:36 · 1/2` |
-| 21 | Chạy tới dòng 36 → `Ctrl+Shift+S` → Ctrl+V vào Excel → F5 trong VS tới dòng 39 → `Ctrl+Shift+S` | Lần 1 Watch = `inputFile`, `rc`; lần 2 Watch chỉ còn `rc != 0`; thanh `✓ đủ 2 ảnh` |
+| 20 | Copy `CHECK_INPUT`, rồi `「%INPUT_FILE%」「%RC%」` (1 lần), rồi `「if "%RC%" NEQ "0"」`, bấm `Ctrl+Shift+G` | 3 breakpoint: dòng 36, dòng 39, cột `goto` của dòng 39; thanh `inputFile, rc · Program.cs:36 · 1/3` |
+| 21 | Chạy tới dòng 36 → `Ctrl+Shift+S` → Ctrl+V vào Excel → F5 trong VS tới dòng 39 → `Ctrl+Shift+S` | Lần 1 Watch = `inputFile`, `rc`; lần 2 Watch chỉ còn `rc != 0` (= false). Chụp xong báo đỏ `SET("RC", "1") lỗi…` vì BigSample không có hàm `SET` — xem dòng 23 |
 | 22 | Copy `「goto :END_PROC」`, bấm `Ctrl+Shift+G`, cho chương trình chạy tới | Breakpoint dòng 92; khi dừng Watch trống; `Ctrl+Shift+S` chụp được |
+| 23 | Thoát app, sửa `settings.json`: `"IfSetStatement": "rc = {value}"` (chỉ cho BigSample), mở lại app, làm lại dòng 20–21 | Chụp xong dòng 39 app chạy `rc = 1`, thanh `Ctrl+V rồi F5 trong VS → rc != 0 · Program.cs:39:22 · 3/3`; F5 → dừng ở `goto`, Watch `rc != 0` = true; `Ctrl+Shift+S` → `✓ đủ 3 ảnh` |

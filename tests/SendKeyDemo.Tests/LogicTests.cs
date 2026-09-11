@@ -666,16 +666,14 @@ public class CopyGroupTests
     [Fact]
     public void GroupStops_if_and_goto_on_same_line_are_two_shots_by_column()
     {
-        const string set = "SET(\"RC\", \"1\")";
         var stops = Mapping.GroupStops(new[]
         {
-            new StopTarget(@"C:\p\Program.cs", 33, 29, "rc != 0", "if", Column: 22, Condition: "rc != 0"),
-            new StopTarget(@"C:\p\Program.cs", 33, 29, "rc != 0", "if", SetStatement: set, Condition: "rc != 0"),
+            new StopTarget(@"C:\p\Program.cs", 33, 29, "rc != 0", "if", Column: 22),
+            new StopTarget(@"C:\p\Program.cs", 33, 29, "rc != 0", "if", Condition: "rc != 0"),
         });
         Assert.Equal(new[] { 0, 22 }, stops.Select(s => s.Column));
-        Assert.Equal(set, stops[0].SetStatement);
-        Assert.Equal("", stops[1].SetStatement);
-        Assert.All(stops, s => Assert.Equal("rc != 0", s.Condition));
+        Assert.Equal("rc != 0", stops[0].Condition);   // dòng if: chụp xong thì set cho mệnh đề đúng
+        Assert.Equal("", stops[1].Condition);          // lệnh đầu nhánh: chỉ chụp
     }
 
     [Theory]

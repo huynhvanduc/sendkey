@@ -296,7 +296,7 @@ public static class VsAutomation
     /// ở frame đang dừng rồi kiểm <paramref name="condition"/> = true. KHÔNG chạy tiếp — dev tự F5 để vào nhánh.
     /// Trả câu lỗi, hoặc null nếu mệnh đề đã đúng.
     /// </summary>
-    public static string? RunIfBypass(DTE dte, string file, int fromLine, string statement, string condition)
+    public static string? RunIfBypass(DTE dte, string statement, string condition)
     {
         var dbg = dte.Debugger;
         if (dbg.CurrentMode != dbgDebugMode.dbgBreakMode) return $"VS không còn dừng — chưa chạy được {statement}.";

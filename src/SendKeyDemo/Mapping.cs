@@ -15,15 +15,13 @@ public record LabelLineResult(LabelLineKind Kind, int Line = 0, IReadOnlyList<in
 
 /// <summary>
 /// Một điểm dừng khi chụp: 1 dòng code = 1 ảnh (nhánh if nằm cùng dòng thì tách theo cột), Watch chỉ gồm các biến
-/// rơi vào đây. Mệnh đề if: Condition = biểu thức C# của mệnh đề; SetStatement = lệnh chạy ngay sau khi chụp ở đây
-/// để ép mệnh đề ĐÚNG (rỗng mà có Condition = dev tự set).
+/// rơi vào đây. Condition ≠ "" = dòng if: chụp xong ở đây app set cho mệnh đề (biểu thức C# này) ĐÚNG.
 /// </summary>
 public record StopPoint(string File, int Line, int LabelLine, IReadOnlyList<string> Watch, IReadOnlyList<string> Items,
-    int Column = 0, string SetStatement = "", string Condition = "");
+    int Column = 0, string Condition = "");
 
 /// <summary>Một 「」 đã tra ra chỗ dừng — đầu vào của <see cref="Mapping.GroupStops"/>.</summary>
-public record StopTarget(string File, int Line, int LabelLine, string Watch, string Item,
-    int Column = 0, string SetStatement = "", string Condition = "");
+public record StopTarget(string File, int Line, int LabelLine, string Watch, string Item, int Column = 0, string Condition = "");
 
 public record LookupResult(
     LookupKind Kind,
@@ -285,7 +283,6 @@ public static class Mapping
                 g.Select(t => t.Watch).Where(w => w.Length > 0).Distinct().ToList(),
                 g.Select(t => t.Item).ToList(),
                 g.Key.Column,
-                g.Select(t => t.SetStatement).FirstOrDefault(s => s.Length > 0) ?? "",
                 g.Select(t => t.Condition).FirstOrDefault(s => s.Length > 0) ?? ""))
             .OrderBy(s => fileOrder.FindIndex(f => string.Equals(f, s.File, StringComparison.OrdinalIgnoreCase)))
             .ThenBy(s => s.Line)
