@@ -76,6 +76,7 @@ public sealed class AppSettings
     // ---- chế độ chụp bằng chứng ----
     /// <summary>Hotkey đặt breakpoint cho cặp đang hiện trên thanh chụp.</summary>
     public string GotoCurrentHotkey { get; set; } = "Ctrl+Shift+G";
+    public string RunHotkey { get; set; } = "Ctrl+Shift+Z";   // thay F5 (trùng phím chạy của VS), bấm ở cửa sổ nào cũng được
 
     /// <summary>Vị trí thanh trạng thái mỏng người dùng đã kéo tới; null = canh giữa mép trên.</summary>
     public int? StripX { get; set; }

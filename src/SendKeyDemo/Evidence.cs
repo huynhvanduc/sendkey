@@ -244,6 +244,7 @@ public sealed class EvidenceSession : IDisposable
             foreach (var s in stops)
                 _host.Log("Chụp: " + VsAutomation.EnsureBreakpoint(dte, s.File, s.Line));
             VsAutomation.ShowLabel(dte, stops[0].File, stops[0].LabelLine, stops[0].Line);
+            VsAutomation.BringToFront(dte);
         }
         catch (Exception ex) { Block("Lỗi thao tác VS: " + ex.Message); return; }
 
@@ -258,6 +259,22 @@ public sealed class EvidenceSession : IDisposable
                           "giá trị có thể chưa được gán ở đây.");
 
         _bar.SetPair(_cmdLabel, _items, TargetText(stops, 0));
+        _bar.SetStatus(StripState.Pending, null);
+    }
+
+    /// <summary>
+    /// Hotkey thay F5 (F5 trùng phím chạy của VS): VS bắt đầu chạy, hoặc chạy tiếp tới dòng cần chụp sau.
+    /// Bấm ở cửa sổ nào cũng được — không phải chuyển từ Excel sang VS.
+    /// </summary>
+    public void Continue()
+    {
+        if (!_active) return;
+        if (_host.CurrentDte() is not { } dte) { Block("Chưa chọn instance VS — mở cửa sổ cấu hình bấm Refresh."); return; }
+        try
+        {
+            if (VsAutomation.Go(dte) is { } err) { Block(err); return; }
+        }
+        catch (Exception ex) { Block("Không chạy được VS: " + ex.Message); return; }
         _bar.SetStatus(StripState.Pending, null);
     }
 
@@ -327,6 +344,9 @@ public sealed class EvidenceSession : IDisposable
 
         if (_stops.Count == 0) { Block($"Chưa đặt breakpoint — bấm {_settings.GotoCurrentHotkey} trước."); return; }
         if (_host.SavedRegion is not { } region) { Block($"Chưa khoanh vùng chụp — bấm {_settings.DefineRegionHotkey} một lần."); return; }
+
+        // Chụp xong lần trước app đưa Excel lên, có thể đang che VS → đưa VS lên trước khi điền Watch và chụp vùng.
+        if (_host.CurrentDte() is { } front) VsAutomation.BringToFront(front);
 
         var result = Recheck(refresh: true);
         if (result == null) return;

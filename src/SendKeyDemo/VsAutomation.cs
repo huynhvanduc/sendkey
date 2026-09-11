@@ -261,7 +261,7 @@ public static class VsAutomation
     {
         if (string.IsNullOrWhiteSpace(expression)) return "biểu thức trống";
         if (dte.Debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
-            return "Chưa ở break mode — F5 chạy chương trình và để nó DỪNG lại ở breakpoint, rồi mới Add Watch.";
+            return "Chưa ở break mode — cho chương trình chạy (Ctrl+Shift+Z) và DỪNG lại ở breakpoint, rồi mới Add Watch.";
 
         var copied = false;
         try { Clipboard.SetText(expression); copied = true; } catch { /* clipboard đang bận */ }
@@ -282,6 +282,30 @@ public static class VsAutomation
         return copied
             ? $"đã copy \"{expression}\" + mở cửa sổ Watch — bấm Ctrl+V rồi Enter (không gõ tự động để tránh sửa nhầm file .cs)."
             : $"không copy được clipboard — tự gõ \"{expression}\" vào cửa sổ Watch.";
+    }
+
+    /// <summary>
+    /// Thay F5: VS đang sửa code thì bắt đầu debug, đang dừng thì chạy tiếp. Đưa VS lên trước.
+    /// Trả câu lỗi, hoặc null nếu đã chạy.
+    /// </summary>
+    public static string? Go(DTE dte)
+    {
+        if (dte.Debugger.CurrentMode == dbgDebugMode.dbgRunMode) return "VS đang chạy — đợi chương trình dừng ở breakpoint.";
+        BringToFront(dte);
+        dte.Debugger.Go(false);
+        return null;
+    }
+
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    /// <summary>
+    /// Đưa cửa sổ VS lên trước. Gọi từ app ngay sau khi nhận phím tắt — lúc đó Windows cho app đổi cửa sổ
+    /// foreground; còn MainWindow.Activate là VS tự gọi nên thường chỉ nhấp nháy trên taskbar.
+    /// </summary>
+    public static void BringToFront(DTE dte)
+    {
+        var hwnd = new IntPtr(dte.MainWindow.HWnd);
+        if (hwnd != IntPtr.Zero) SetForegroundWindow(hwnd);
     }
 
     // ---- Watch tự điền: không gõ phím nào vào VS ----
@@ -498,7 +522,7 @@ public static class CaptureCheck
 
         if (!s.InBreakMode)
             return new CheckResult(CheckLevel.Block,
-                "Chưa dừng ở breakpoint — F5 và để chương trình DỪNG lại rồi mới chụp.");
+                "Chưa dừng ở breakpoint — bấm Ctrl+Shift+Z cho chương trình chạy, đợi DỪNG lại rồi mới chụp.");
 
         if (string.IsNullOrEmpty(s.HitFile) || s.HitLine <= 0)
             return new CheckResult(CheckLevel.Block,
