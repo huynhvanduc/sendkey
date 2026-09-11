@@ -262,22 +262,6 @@ public sealed class EvidenceSession : IDisposable
         _bar.SetStatus(StripState.Pending, null);
     }
 
-    /// <summary>
-    /// Hotkey thay F5 (F5 trùng phím chạy của VS): VS bắt đầu chạy, hoặc chạy tiếp tới dòng cần chụp sau.
-    /// Bấm ở cửa sổ nào cũng được — không phải chuyển từ Excel sang VS.
-    /// </summary>
-    public void Continue()
-    {
-        if (!_active) return;
-        if (_host.CurrentDte() is not { } dte) { Block("Chưa chọn instance VS — mở cửa sổ cấu hình bấm Refresh."); return; }
-        try
-        {
-            if (VsAutomation.Go(dte) is { } err) { Block(err); return; }
-        }
-        catch (Exception ex) { Block("Không chạy được VS: " + ex.Message); return; }
-        _bar.SetStatus(StripState.Pending, null);
-    }
-
     // ---------------- chấm + chụp ----------------
 
     /// <summary>
@@ -321,8 +305,7 @@ public sealed class EvidenceSession : IDisposable
         }
 
         var snap = VsAutomation.ReadDebugState(dte, stop.File, stop.Watch);
-        var result = CaptureCheck.Evaluate(snap, TcId, stop.File, stop.Line, string.Join("; ", stop.Watch), _last,
-            _settings.RunHotkey);
+        var result = CaptureCheck.Evaluate(snap, TcId, stop.File, stop.Line, string.Join("; ", stop.Watch), _last);
 
         // Watch phải có đúng biến của dòng này — lý do bị review trả ảnh nhiều nhất.
         if (result.Level != CheckLevel.Block && VsAutomation.ReadWatchNames(dte) is { } names &&
@@ -389,7 +372,10 @@ public sealed class EvidenceSession : IDisposable
         _host.Log($"Chụp XONG {TcId} · {Path.GetFileName(stop.File)}:{stop.Line} → clipboard (Ctrl+V để dán).");
 
         bool all = _done.Count == _stops.Count;
-        _bar.SetPair(_cmdLabel, _items, all ? $"✓ đủ {_stops.Count} ảnh — copy test case tiếp" : TargetText(_stops, NextStop()));
+        // Chưa đủ nhóm: nhắc dán ảnh này trước (clipboard chỉ giữ 1 ảnh) rồi mới F5 trong VS — app không tự chạy tiếp.
+        _bar.SetPair(_cmdLabel, _items, all
+            ? $"✓ đủ {_stops.Count} ảnh — copy test case tiếp"
+            : $"Ctrl+V rồi F5 trong VS → {TargetText(_stops, NextStop())}");
         _bar.SetStatus(all ? StripState.Ok : StripState.Pending, null);
 
         // Đưa lại cửa sổ vừa copy (Excel) để Ctrl+V luôn.
@@ -492,7 +478,7 @@ public enum StripState { Idle, Pending, Ok, Confirm, Block }
 /// <summary>
 /// Thanh nổi 1 dòng, luôn trên cùng trong lúc chụp bằng chứng:
 ///   ●  CHECK_INPUT 「%RC%」「%TAX%」  →  rc, tax · Program.cs:42 · 1/2
-/// Màu chấm (và viền thanh): xám = chờ copy · xanh dương = chờ F5 · xanh lá = chụp được · vàng = ⚠ · đỏ = ❌.
+/// Màu chấm (và viền thanh): xám = chờ copy · xanh dương = chờ chương trình dừng ở breakpoint · xanh lá = chụp được · vàng = ⚠ · đỏ = ❌.
 /// Dòng 2 chỉ hiện khi vàng/đỏ, đúng 1 câu lý do. Chưa có mapping thì ô nhập C# hiện ngay sau mũi tên
 /// (ca goto chỉ 1 ô csharpLabel); Enter = <see cref="InputSubmitted"/>.
 /// Không cướp focus khi hiện/cập nhật — chỉ lấy focus lúc cần gõ (<see cref="AskInput"/>).

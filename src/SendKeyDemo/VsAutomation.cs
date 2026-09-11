@@ -284,17 +284,8 @@ public static class VsAutomation
             : $"không copy được clipboard — tự gõ \"{expression}\" vào cửa sổ Watch.";
     }
 
-    /// <summary>
-    /// Thay F5: VS đang sửa code thì bắt đầu debug, đang dừng thì chạy tiếp. Đưa VS lên trước.
-    /// Trả câu lỗi, hoặc null nếu đã chạy.
-    /// </summary>
-    public static string? Go(DTE dte)
-    {
-        if (dte.Debugger.CurrentMode == dbgDebugMode.dbgRunMode) return "VS đang chạy — đợi chương trình dừng ở breakpoint.";
-        BringToFront(dte);
-        dte.Debugger.Go(false);
-        return null;
-    }
+    // Cố ý KHÔNG có hàm chạy / chạy tiếp debug: user mở tool khi chương trình ĐANG debug sẵn, app không được
+    // tự Start hay khởi động lại phiên debug (user yêu cầu 2026-09-11).
 
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
 
@@ -515,15 +506,14 @@ public static class CaptureCheck
         string expectedFile,
         int expectedLine,
         string watchExpr,
-        LastCapture? previous,
-        string runKey = "")
+        LastCapture? previous)
     {
         if (!s.Available)
             return new CheckResult(CheckLevel.Block, s.Error ?? "Không đọc được trạng thái VS — bấm Refresh chọn lại instance.");
 
         if (!s.InBreakMode)
             return new CheckResult(CheckLevel.Block,
-                $"Chưa dừng ở breakpoint — {(runKey.Length > 0 ? $"bấm {runKey} cho" : "cho")} chương trình chạy, đợi DỪNG lại rồi mới chụp.");
+                "Chưa dừng ở breakpoint — đợi chương trình chạy tới breakpoint rồi mới chụp.");
 
         if (string.IsNullOrEmpty(s.HitFile) || s.HitLine <= 0)
             return new CheckResult(CheckLevel.Block,

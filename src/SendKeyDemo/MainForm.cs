@@ -528,8 +528,6 @@ public class MainForm : Form
         RegisterOne(_settings.ActiveWindowHotkey, defaults.ActiveWindowHotkey, "Chụp cửa sổ", CaptureActiveWindow, failed);
         RegisterOne(_settings.GotoCurrentHotkey, defaults.GotoCurrentHotkey, "Chạy cặp đang chọn",
             () => _evidence?.Run(), failed);
-        RegisterOne(_settings.RunHotkey, defaults.RunHotkey, "Chạy / chạy tiếp VS (thay F5)",
-            () => _evidence?.Continue(), failed);
 
         return failed.Count > 0 ? "không đăng ký được: " + string.Join("; ", failed) : null;
     }

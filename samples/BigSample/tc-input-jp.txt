@@ -13,7 +13,7 @@ CÁCH COPY  (quy tắc duy nhất: trong 「 」 là biến, ngoài ngoặc là 
   - Bôi đen dòng "ラベル" rồi Ctrl+C   → app nhận là LABEL
   - Bôi đen dòng "確認値" rồi Ctrl+C   → app nhận là BIẾN (tự bóc phần trong 「 」)
     (copy cả câu dài cũng được — app chỉ lấy phần trong ngoặc)
-  - Ctrl+Shift+G  → đặt breakpoint  |  F5 + Ctrl+V vào Watch  |  Ctrl+Shift+S → chụp
+  - Ctrl+Shift+G  → đặt breakpoint  |  chương trình (đang debug sẵn) chạy tới thì dừng, app tự điền Watch  |  Ctrl+Shift+S → chụp
 
 LƯU Ý: mỗi dòng "ラベル" chỉ chứa đúng tên label, không có tiền tố.
 Nếu file thật của bạn để kiểu  ラベル：CHECK_INPUT  trong cùng một ô thì báo mình,
