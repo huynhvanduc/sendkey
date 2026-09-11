@@ -624,10 +624,10 @@ public class CopyGroupTests
     {
         var stops = Mapping.GroupStops(new[]
         {
-            (@"C:\p\Program.cs", 40, 35, "total", "%TOTAL%"),
-            (@"C:\p\Program.cs", 27, 25, "rc", "%RC%"),
-            (@"c:\P\program.cs", 40, 35, "tax", "%TAX%"),
-            (@"C:\p\Program.cs", 92, 91, "", "goto :END_PROC"),
+            new StopTarget(@"C:\p\Program.cs", 40, 35, "total", "%TOTAL%"),
+            new StopTarget(@"C:\p\Program.cs", 27, 25, "rc", "%RC%"),
+            new StopTarget(@"c:\P\program.cs", 40, 35, "tax", "%TAX%"),
+            new StopTarget(@"C:\p\Program.cs", 92, 91, "", "goto :END_PROC"),
         });
         Assert.Equal(new[] { 27, 40, 92 }, stops.Select(s => s.Line));
         Assert.Equal(new[] { "total", "tax" }, stops[1].Watch);
@@ -639,8 +639,8 @@ public class CopyGroupTests
     {
         var stops = Mapping.GroupStops(new[]
         {
-            (@"C:\p\Steps.cs", 50, 48, "amount", "%AMT%"),
-            (@"C:\p\Program.cs", 10, 9, "rc", "%RC%"),
+            new StopTarget(@"C:\p\Steps.cs", 50, 48, "amount", "%AMT%"),
+            new StopTarget(@"C:\p\Program.cs", 10, 9, "rc", "%RC%"),
         });
         Assert.Equal(new[] { "Steps.cs", "Program.cs" }, stops.Select(s => Path.GetFileName(s.File)));
     }
@@ -659,6 +659,71 @@ public class CopyGroupTests
     {
         Assert.Null(CaptureCheck.WatchMismatch(Array.Empty<string>(), Array.Empty<string>()));
         Assert.Equal("Watch dư rc.", CaptureCheck.WatchMismatch(new[] { "rc" }, Array.Empty<string>()));
+    }
+
+    // ---------- bypass mệnh đề if ----------
+
+    [Fact]
+    public void GroupStops_if_and_goto_on_same_line_are_two_shots_by_column()
+    {
+        const string set = "SET(\"RC\", \"1\")";
+        var stops = Mapping.GroupStops(new[]
+        {
+            new StopTarget(@"C:\p\Program.cs", 33, 29, "rc != 0", "if", Column: 22, Condition: "rc != 0"),
+            new StopTarget(@"C:\p\Program.cs", 33, 29, "rc != 0", "if", SetStatement: set, Condition: "rc != 0"),
+        });
+        Assert.Equal(new[] { 0, 22 }, stops.Select(s => s.Column));
+        Assert.Equal(set, stops[0].SetStatement);
+        Assert.Equal("", stops[1].SetStatement);
+        Assert.All(stops, s => Assert.Equal("rc != 0", s.Condition));
+    }
+
+    [Theory]
+    [InlineData("if \"%RC%\" NEQ \"0\"", "RC", "1")]
+    [InlineData("if \"%RC%\" NEQ \"8\"", "RC", "0")]
+    [InlineData("if \"%MODE%\" EQU \"PROD\"", "MODE", "PROD")]
+    [InlineData("if \"%MODE%\"==\"PROD\"", "MODE", "PROD")]
+    [InlineData("if /i \"%MODE%\" == \"prod\"", "MODE", "prod")]
+    [InlineData("if %CNT% GTR 3", "CNT", "4")]
+    [InlineData("if %CNT% LSS 3", "CNT", "2")]
+    [InlineData("if %CNT% GEQ 3", "CNT", "3")]
+    [InlineData("if %CNT% LEQ 3", "CNT", "3")]
+    [InlineData("if not \"%RC%\"==\"0\"", "RC", "1")]
+    [InlineData("if not %CNT% GTR 3", "CNT", "3")]
+    [InlineData("IF \"%RC%\" NEQ \"0\" goto :ERR", "RC", "1")]
+    public void IfClause_suggests_value_that_makes_clause_true(string clause, string var, string value)
+        => Assert.Equal(new IfBypass(var, value), IfClause.Suggest(clause));
+
+    [Theory]
+    [InlineData("if exist \"%IN_FILE%\"")]
+    [InlineData("if defined RC")]
+    [InlineData("if errorlevel 1")]
+    [InlineData("if %CNT% GTR abc")]
+    [InlineData("%RC%")]
+    public void IfClause_unrecognized_gives_no_suggestion(string clause)
+        => Assert.Null(IfClause.Suggest(clause));
+
+    [Fact]
+    public void IfClause_statement_fills_template()
+        => Assert.Equal("SET(\"RC\", \"1\")", IfClause.Statement("SET(\"{var}\", \"{value}\")", new IfBypass("RC", "1")));
+
+    [Fact]
+    public void BranchStart_goto_on_same_line_gives_its_column()
+        => Assert.Equal<(int, int)?>((1, 22), Mapping.BranchStart(new[] { "        if (rc != 0) goto HANDLE_ERROR;" }, 1));
+
+    [Fact]
+    public void BranchStart_nested_parens_and_brace_on_same_line()
+        => Assert.Equal<(int, int)?>((1, 30), Mapping.BranchStart(new[] { "if (Check(rc) && (a || b)) { return; }" }, 1));
+
+    [Fact]
+    public void BranchStart_block_on_next_lines_gives_first_statement_line()
+        => Assert.Equal<(int, int)?>((3, 0), Mapping.BranchStart(new[] { "    if (rc != 0)", "    {", "        goto X;", "    }" }, 1));
+
+    [Fact]
+    public void BranchStart_null_when_not_an_if_or_condition_spans_lines()
+    {
+        Assert.Null(Mapping.BranchStart(new[] { "rc = 0;" }, 1));
+        Assert.Null(Mapping.BranchStart(new[] { "if (rc != 0 &&", "    x)", "goto X;" }, 1));
     }
 }
 

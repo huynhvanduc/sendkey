@@ -159,7 +159,7 @@ public sealed class EvidenceSession : IDisposable
         var rows = _host.GetMapRows();
         if (rows == null) return Fail("Chưa nạp được mapping.csv — kiểm tra đường dẫn ở cửa sổ cấu hình.");
 
-        var targets = new List<(string File, int Line, int LabelLine, string Watch, string Item)>();
+        var targets = new List<StopTarget>();
         foreach (var item in _items)
         {
             // 「goto :X」 → dừng ở dòng đầu label X, không cần Watch; còn lại tra theo label vừa copy.
@@ -197,7 +197,22 @@ public sealed class EvidenceSession : IDisposable
                     LabelLineKind.NoExecutableLine => $"Sau \"{row.CsharpLabel}:\" không còn dòng thực thi.",
                     _ => $"Không thấy biểu thức \"{watch}\" sau \"{row.CsharpLabel}:\".",
                 });
-            targets.Add((csp, ll.Line, ll.LabelLine, watch, item));
+            targets.Add(new StopTarget(csp, ll.Line, ll.LabelLine, watch, item));
+
+            // Mệnh đề if: ảnh 1 ở dòng if (giá trị thật) → chụp xong app SET cho mệnh đề ĐÚNG → ảnh 2 ở lệnh đầu nhánh.
+            if (gotoLabel == null && IfClause.IsIf(item) && Mapping.IsExpression(watch))
+            {
+                var bypass = IfClause.Suggest(item);
+                targets[^1] = targets[^1] with
+                {
+                    SetStatement = bypass == null ? "" : IfClause.Statement(_settings.IfSetStatement, bypass),
+                    Condition = watch,
+                };
+                if (Mapping.BranchStart(File.ReadAllLines(csp), ll.Line) is { } branch)
+                    targets.Add(new StopTarget(csp, branch.Line, ll.LabelLine, watch, item, branch.Column));
+                else
+                    _host.Log($"Chụp: không tìm được lệnh đầu nhánh của {Path.GetFileName(csp)}:{ll.Line} — chỉ chụp dòng if.");
+            }
         }
 
         var stops = Mapping.GroupStops(targets);
@@ -242,7 +257,7 @@ public sealed class EvidenceSession : IDisposable
             foreach (var f in _bpFiles.Concat(stops.Select(s => s.File)).Distinct(StringComparer.OrdinalIgnoreCase).ToList())
                 VsAutomation.ClearBreakpointsInFile(dte, f);
             foreach (var s in stops)
-                _host.Log("Chụp: " + VsAutomation.EnsureBreakpoint(dte, s.File, s.Line));
+                _host.Log("Chụp: " + VsAutomation.EnsureBreakpoint(dte, s.File, s.Line, s.Column));
             VsAutomation.ShowLabel(dte, stops[0].File, stops[0].LabelLine, stops[0].Line);
             VsAutomation.BringToFront(dte);
         }
@@ -283,7 +298,10 @@ public sealed class EvidenceSession : IDisposable
         if (fromEvent && !hit.InBreakMode) return null;   // chưa tới lúc, im lặng
 
         // Đang dừng ở dòng nào trong nhóm; không khớp dòng nào thì so với dòng chưa chụp đầu tiên để báo sai dòng.
-        _currentStop = Enumerable.Range(0, _stops.Count).FirstOrDefault(i => !_done.Contains(i) && IsAt(_stops[i], hit), -1);
+        // if + goto cùng dòng: stop khớp đúng cột breakpoint vừa dừng được ưu tiên, rồi mới tới stop theo dòng (cột 0).
+        var open = Enumerable.Range(0, _stops.Count).Where(i => !_done.Contains(i) && IsAt(_stops[i], hit)).ToList();
+        _currentStop = open.FirstOrDefault(i => _stops[i].Column > 0 && _stops[i].Column == hit.HitColumn,
+                           open.FirstOrDefault(i => _stops[i].Column == 0, -1));
         var stop = _stops[_currentStop >= 0 ? _currentStop : NextStop()];
 
         string note = "";
@@ -371,12 +389,29 @@ public sealed class EvidenceSession : IDisposable
         Beep(StripState.Ok);
         _host.Log($"Chụp XONG {TcId} · {Path.GetFileName(stop.File)}:{stop.Line} → clipboard (Ctrl+V để dán).");
 
+        // Mệnh đề if: đã chụp giá trị thật → ép mệnh đề ĐÚNG để F5 đi vào nhánh (ảnh sau ở lệnh đầu nhánh).
+        // Làm trước khi đưa Excel lên; app KHÔNG tự chạy tiếp.
+        string? bypassNote = null;
+        var bypassState = StripState.Pending;
+        if (stop.Condition.Length > 0)
+        {
+            if (stop.SetStatement.Length == 0)
+                (bypassNote, bypassState) = ($"「{stop.Items[0]}」: tự set giá trị cho mệnh đề này rồi F5.", StripState.Confirm);
+            else if (_host.CurrentDte() is not { } dteSet)
+                (bypassNote, bypassState) = ($"Mất kết nối VS — chưa chạy được {stop.SetStatement}.", StripState.Block);
+            else if (VsAutomation.RunIfBypass(dteSet, stop.File, stop.LabelLine, stop.SetStatement, stop.Condition) is { } err)
+                (bypassNote, bypassState) = (err, StripState.Block);
+            else
+                _host.Log($"Chụp: đã chạy {stop.SetStatement} — {stop.Condition} = true.");
+        }
+
         bool all = _done.Count == _stops.Count;
         // Chưa đủ nhóm: nhắc dán ảnh này trước (clipboard chỉ giữ 1 ảnh) rồi mới F5 trong VS — app không tự chạy tiếp.
         _bar.SetPair(_cmdLabel, _items, all
             ? $"✓ đủ {_stops.Count} ảnh — copy test case tiếp"
             : $"Ctrl+V rồi F5 trong VS → {TargetText(_stops, NextStop())}");
-        _bar.SetStatus(all ? StripState.Ok : StripState.Pending, null);
+        _bar.SetStatus(bypassNote != null ? bypassState : all ? StripState.Ok : StripState.Pending, bypassNote);
+        if (bypassNote != null) Beep(bypassState);
 
         // Đưa lại cửa sổ vừa copy (Excel) để Ctrl+V luôn.
         if (_sourceWindow != IntPtr.Zero) SetForegroundWindow(_sourceWindow);
@@ -391,7 +426,8 @@ public sealed class EvidenceSession : IDisposable
         int i = Math.Clamp(index, 0, stops.Count - 1);
         var s = stops[i];
         var what = s.Watch.Count > 0 ? string.Join(", ", s.Watch) : "goto";
-        return $"{what} · {Path.GetFileName(s.File)}:{s.Line}" + (stops.Count > 1 ? $" · {i + 1}/{stops.Count}" : "");
+        var col = s.Column > 0 ? $":{s.Column}" : "";
+        return $"{what} · {Path.GetFileName(s.File)}:{s.Line}{col}" + (stops.Count > 1 ? $" · {i + 1}/{stops.Count}" : "");
     }
 
     void ResetStops()

@@ -13,8 +13,17 @@ public enum LabelLineKind { NotFound, Multiple, NoExecutableLine, AnchorNotFound
 
 public record LabelLineResult(LabelLineKind Kind, int Line = 0, IReadOnlyList<int>? MatchLines = null, int LabelLine = 0);
 
-/// <summary>Một điểm dừng khi chụp: 1 dòng code = 1 ảnh, Watch chỉ gồm các biến rơi vào dòng này.</summary>
-public record StopPoint(string File, int Line, int LabelLine, IReadOnlyList<string> Watch, IReadOnlyList<string> Items);
+/// <summary>
+/// Một điểm dừng khi chụp: 1 dòng code = 1 ảnh (nhánh if nằm cùng dòng thì tách theo cột), Watch chỉ gồm các biến
+/// rơi vào đây. Mệnh đề if: Condition = biểu thức C# của mệnh đề; SetStatement = lệnh chạy ngay sau khi chụp ở đây
+/// để ép mệnh đề ĐÚNG (rỗng mà có Condition = dev tự set).
+/// </summary>
+public record StopPoint(string File, int Line, int LabelLine, IReadOnlyList<string> Watch, IReadOnlyList<string> Items,
+    int Column = 0, string SetStatement = "", string Condition = "");
+
+/// <summary>Một 「」 đã tra ra chỗ dừng — đầu vào của <see cref="Mapping.GroupStops"/>.</summary>
+public record StopTarget(string File, int Line, int LabelLine, string Watch, string Item,
+    int Column = 0, string SetStatement = "", string Condition = "");
 
 public record LookupResult(
     LookupKind Kind,
@@ -264,20 +273,65 @@ public static class Mapping
     }
 
     /// <summary>
-    /// Gom các đích đã tra thành điểm dừng: cùng file + cùng dòng thì chung 1 ảnh. Thứ tự: file theo lần
-    /// xuất hiện đầu tiên, trong 1 file theo số dòng (thứ tự chương trình chạy qua).
+    /// Gom các đích đã tra thành điểm dừng: cùng file + dòng + cột thì chung 1 ảnh. Thứ tự: file theo lần
+    /// xuất hiện đầu tiên, trong 1 file theo dòng rồi cột (thứ tự chương trình chạy qua).
     /// </summary>
-    public static List<StopPoint> GroupStops(IReadOnlyList<(string File, int Line, int LabelLine, string Watch, string Item)> targets)
+    public static List<StopPoint> GroupStops(IReadOnlyList<StopTarget> targets)
     {
         var fileOrder = targets.Select(t => t.File).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         return targets
-            .GroupBy(t => (File: t.File.ToLowerInvariant(), t.Line))
+            .GroupBy(t => (File: t.File.ToLowerInvariant(), t.Line, t.Column))
             .Select(g => new StopPoint(g.First().File, g.Key.Line, g.First().LabelLine,
                 g.Select(t => t.Watch).Where(w => w.Length > 0).Distinct().ToList(),
-                g.Select(t => t.Item).ToList()))
+                g.Select(t => t.Item).ToList(),
+                g.Key.Column,
+                g.Select(t => t.SetStatement).FirstOrDefault(s => s.Length > 0) ?? "",
+                g.Select(t => t.Condition).FirstOrDefault(s => s.Length > 0) ?? ""))
             .OrderBy(s => fileOrder.FindIndex(f => string.Equals(f, s.File, StringComparison.OrdinalIgnoreCase)))
             .ThenBy(s => s.Line)
+            .ThenBy(s => s.Column)
             .ToList();
+    }
+
+    static readonly Regex _ifHead = new(@"\bif\s*\(");
+
+    /// <summary>
+    /// Lệnh đầu tiên của nhánh if ở dòng <paramref name="ifLine"/> (1-based). Cùng dòng, vd `if (rc != 0) goto X;`
+    /// → (ifLine, cột 1-based của `goto`); nhánh xuống dòng → (dòng thực thi kế tiếp, 0), bỏ qua `{`.
+    /// Không phải dòng `if (` hoặc điều kiện kéo sang dòng khác → null.
+    /// </summary>
+    public static (int Line, int Column)? BranchStart(IReadOnlyList<string> lines, int ifLine)
+    {
+        if (ifLine < 1 || ifLine > lines.Count) return null;
+        var text = lines[ifLine - 1];
+        var m = _ifHead.Match(text);
+        if (!m.Success) return null;
+
+        int depth = 0, close = -1;
+        for (int i = m.Index + m.Length - 1; i < text.Length; i++)
+        {
+            if (text[i] == '(') depth++;
+            else if (text[i] == ')' && --depth == 0) { close = i; break; }
+        }
+        if (close < 0) return null;
+
+        int col = close + 1;
+        while (col < text.Length && char.IsWhiteSpace(text[col])) col++;
+        if (col < text.Length && text[col] == '{')
+        {
+            col++;
+            while (col < text.Length && char.IsWhiteSpace(text[col])) col++;
+        }
+        var tail = text[col..];
+        if (tail.Length > 0 && !tail.StartsWith("//")) return (ifLine, col + 1);
+
+        for (int ln = ifLine + 1; ln <= lines.Count; ln++)
+        {
+            var t = lines[ln - 1].Trim();
+            if (t.Length == 0 || t == "{" || t.StartsWith("//") || t.StartsWith("#")) continue;
+            return (ln, 0);
+        }
+        return null;
     }
 }
 
@@ -381,4 +435,57 @@ public static class CopiedText
         if (inners.Count > 0) return inners.Select(v => new Piece(true, v)).ToList();
         return Classify(raw) is { } p ? new List<Piece> { p } : new List<Piece>();
     }
+}
+
+// ==================== IfClause ====================
+
+/// <summary>Cách ép mệnh đề if batch ĐÚNG (vào nhánh): tên biến batch (bỏ %) + giá trị cần set.</summary>
+public record IfBypass(string Var, string Value);
+
+/// <summary>
+/// Mệnh đề if batch copy trong 「」. Chỉ nhận dạng so sánh biến — `"%RC%" NEQ "0"`, `%N% GTR 3`, kèm /i, not —
+/// đủ để gợi ý giá trị; user sửa được giá trị trong Watch nên không cần hoàn hảo.
+/// </summary>
+public static class IfClause
+{
+    static readonly Regex _if = new(@"^if\s", RegexOptions.IgnoreCase);
+    static readonly Regex _cmp = new(
+        @"^if\s+(?:/i\s+)?(?<not>not\s+)?(?:""%(?<v1>[^%""\s]+)%""|%(?<v2>[^%""\s]+)%)\s*" +
+        @"(?<op>==|equ|neq|lss|leq|gtr|geq)\s*(?:""(?<x1>[^""]*)""|(?<x2>[^\s""]+))",
+        RegexOptions.IgnoreCase);
+
+    public static bool IsIf(string? item) => _if.IsMatch((item ?? "").Trim());
+
+    /// <summary>Giá trị làm mệnh đề ĐÚNG; if exist / defined / errorlevel / không nhận ra → null (dev tự set).</summary>
+    public static IfBypass? Suggest(string? item)
+    {
+        var m = _cmp.Match((item ?? "").Trim());
+        if (!m.Success) return null;
+
+        var name = m.Groups["v1"].Success ? m.Groups["v1"].Value : m.Groups["v2"].Value;
+        var x = m.Groups["x1"].Success ? m.Groups["x1"].Value : m.Groups["x2"].Value;
+        var op = m.Groups["op"].Value.ToLowerInvariant();
+        if (m.Groups["not"].Success)
+            op = op switch
+            {
+                "==" or "equ" => "neq", "neq" => "equ",
+                "gtr" => "leq", "leq" => "gtr", "lss" => "geq", "geq" => "lss",
+                _ => op,
+            };
+
+        string? value = op switch
+        {
+            "==" or "equ" => x,
+            "neq" => x == "0" ? "1" : "0",
+            _ when !int.TryParse(x, out _) => null,
+            "gtr" => (int.Parse(x) + 1).ToString(),
+            "lss" => (int.Parse(x) - 1).ToString(),
+            _ => x.Trim(),   // geq / leq
+        };
+        return value == null ? null : new IfBypass(name, value);
+    }
+
+    /// <summary>Lệnh set từ mẫu trong settings, vd <c>SET("{var}", "{value}")</c>.</summary>
+    public static string Statement(string template, IfBypass bypass)
+        => template.Replace("{var}", bypass.Var).Replace("{value}", bypass.Value);
 }

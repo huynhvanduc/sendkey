@@ -131,17 +131,20 @@ public static class VsAutomation
             : $"đã xóa {n} breakpoint ở {Path.GetFileName(file)}";
     }
 
-    public static string EnsureBreakpoint(DTE dte, string file, int line)
+    /// <summary>Đặt breakpoint nếu chưa có. <paramref name="column"/> > 0: breakpoint theo cột (vd `goto` nằm cùng dòng với `if`).</summary>
+    public static string EnsureBreakpoint(DTE dte, string file, int line, int column = 0)
     {
         if (!File.Exists(file)) return $"file không tồn tại: {file}";
+        var where = column > 0 ? $"{Path.GetFileName(file)}:{line}:{column}" : $"{Path.GetFileName(file)}:{line}";
         foreach (Breakpoint bp in dte.Debugger.Breakpoints)
         {
-            if (string.Equals(bp.File, file, StringComparison.OrdinalIgnoreCase) && bp.FileLine == line)
-                return $"breakpoint đã có tại {Path.GetFileName(file)}:{line}";
+            if (string.Equals(bp.File, file, StringComparison.OrdinalIgnoreCase) && bp.FileLine == line &&
+                (column > 0 ? bp.FileColumn == column : bp.FileColumn <= 1))
+                return $"breakpoint đã có tại {where}";
         }
         try
         {
-            dte.Debugger.Breakpoints.Add("", file, line);
+            dte.Debugger.Breakpoints.Add("", file, line, column > 0 ? column : 1);
         }
         catch (COMException)
         {
@@ -172,13 +175,13 @@ public static class VsAutomation
             // Breakpoint nào vừa làm chương trình dừng — chính xác hơn nhiều so với đọc vị trí con trỏ,
             // vì con trỏ có thể đã bị người dùng click đi chỗ khác.
             string hitFile = "";
-            int hitLine = 0;
+            int hitLine = 0, hitColumn = 0;
             if (inBreak)
             {
                 try
                 {
                     var hit = dbg.BreakpointLastHit;
-                    if (hit != null) { hitFile = hit.File ?? ""; hitLine = hit.FileLine; }
+                    if (hit != null) { hitFile = hit.File ?? ""; hitLine = hit.FileLine; hitColumn = hit.FileColumn; }
                 }
                 catch (COMException) { /* dừng không do breakpoint */ }
             }
@@ -218,7 +221,8 @@ public static class VsAutomation
             try { pid = dbg.CurrentProcess?.ProcessID ?? 0; }
             catch (COMException) { /* chưa chạy */ }
 
-            return new DebugSnapshot(true, inBreak, hitFile, hitLine, bpInFile, exprValid, exprValue, pid, BadExpr: badExpr);
+            return new DebugSnapshot(true, inBreak, hitFile, hitLine, bpInFile, exprValid, exprValue, pid,
+                BadExpr: badExpr, HitColumn: hitColumn);
         }
         catch (Exception ex)
         {
@@ -286,6 +290,28 @@ public static class VsAutomation
 
     // Cố ý KHÔNG có hàm chạy / chạy tiếp debug: user mở tool khi chương trình ĐANG debug sẵn, app không được
     // tự Start hay khởi động lại phiên debug (user yêu cầu 2026-09-11).
+
+    /// <summary>
+    /// Ép mệnh đề if ĐÚNG sau khi đã chụp giá trị thật ở dòng if: chạy <paramref name="statement"/> (vd SET("RC", "1"))
+    /// ở frame đang dừng rồi kiểm <paramref name="condition"/> = true. KHÔNG chạy tiếp — dev tự F5 để vào nhánh.
+    /// Trả câu lỗi, hoặc null nếu mệnh đề đã đúng.
+    /// </summary>
+    public static string? RunIfBypass(DTE dte, string file, int fromLine, string statement, string condition)
+    {
+        var dbg = dte.Debugger;
+        if (dbg.CurrentMode != dbgDebugMode.dbgBreakMode) return $"VS không còn dừng — chưa chạy được {statement}.";
+        try
+        {
+            var r = dbg.GetExpression(statement, true, 5000);
+            if (!r.IsValidValue) return $"{statement} lỗi: {r.Value}";
+            var c = dbg.GetExpression(condition, true, 2000);
+            if (!c.IsValidValue) return $"Đã chạy {statement} nhưng không đọc được {condition}: {c.Value}";
+            if (!string.Equals(c.Value, "true", StringComparison.OrdinalIgnoreCase))
+                return $"Đã chạy {statement} nhưng {condition} vẫn = {c.Value} — sửa giá trị rồi Enter.";
+        }
+        catch (COMException ex) { return $"{statement} lỗi: {ex.Message}"; }
+        return null;
+    }
 
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
 
@@ -444,7 +470,8 @@ public record DebugSnapshot(
     string ExprValue,
     int ProcessId,
     string? Error = null,
-    string BadExpr = "")
+    string BadExpr = "",
+    int HitColumn = 0)
 {
     public static DebugSnapshot Unavailable(string error) =>
         new(false, false, "", 0, 0, false, "", 0, error);

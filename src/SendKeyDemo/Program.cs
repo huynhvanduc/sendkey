@@ -77,6 +77,9 @@ public sealed class AppSettings
     /// <summary>Hotkey đặt breakpoint cho cặp đang hiện trên thanh chụp.</summary>
     public string GotoCurrentHotkey { get; set; } = "Ctrl+Shift+G";
 
+    /// <summary>Lệnh ép mệnh đề if ĐÚNG, chạy ngay sau khi chụp ảnh ở dòng if. {var} = tên biến batch bỏ %, {value} = giá trị.</summary>
+    public string IfSetStatement { get; set; } = "SET(\"{var}\", \"{value}\")";
+
     /// <summary>Vị trí thanh trạng thái mỏng người dùng đã kéo tới; null = canh giữa mép trên.</summary>
     public int? StripX { get; set; }
     public int? StripY { get; set; }
