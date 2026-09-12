@@ -1,0 +1,439 @@
+================================================================================
+ File test case mẫu SỐ 2 — cho phần mở rộng của Program.cs (95 nhãn)
+ Copy từng khối bên dưới y như copy từ Excel.
+================================================================================
+
+CHUẨN BỊ
+  1. Mở samples/BigSample/BigSample.csproj trong Visual Studio, F5 cho chạy.
+     Chương trình chạy hết rồi dừng ở dòng chờ phím — bấm x trong cửa sổ console
+     là thoát. Muốn dừng giữa chừng thì đặt breakpoint rồi F5.
+  2. Trong app:  mapping.csv = samples/BigSample/mapping.csv
+                 target .cs  = samples/BigSample/Program.cs
+  3. Bấm  ▶ Bắt đầu chụp bằng chứng
+  4. Sắp VS thấy cả dòng code lẫn cửa sổ Watch  →  Ctrl+Shift+R khoanh vùng (1 lần).
+
+CÁCH COPY  (quy tắc duy nhất: trong 「 」 là biến, ngoài ngoặc là label)
+  - Copy dòng dưới "ラベル"  → app nhận là LABEL, cuộn tới nhãn đó, KHÔNG đặt breakpoint
+  - Copy LẠI y hệt          → sang nhãn / dòng KẾ TIẾP (hết thì quay vòng)
+  - Copy dòng dưới "確認値"  → app tìm biến đó TRONG nhãn đang đứng
+  - Ctrl+Shift+G            → đặt breakpoint ở dòng đang chọn + thêm Watch
+
+CHẤM TRÊN THANH
+  🟢 tìm thấy đúng 1 dòng   🟡 nhiều dòng, copy lại để duyệt   🔴 không thấy
+
+QUAN TRỌNG — mapping.csv hiện CHƯA có dòng nào cho các nhãn mới bên dưới.
+  - Copy LABEL vẫn chạy được: app tìm theo prefix ngay trong file .cs đang mở.
+  - Copy BIẾN sẽ ra 🔴 "chưa có trong mapping.csv — bấm Ctrl+Shift+G để gõ C#".
+    Lúc đó bấm Ctrl+Shift+G, gõ tên C# theo cột "gõ gì" của từng ca, Enter.
+    Gõ một lần là app ghi vào mapping.csv, lần sau khỏi gõ.
+
+
+================================================================================
+ A. NHÃN CÙNG HỌ PREFIX — copy lại để duyệt (không cần mapping)
+================================================================================
+
+--------------------------------------------------------------------------------
+TC2-01  ラベルのプレフィックス検索：PARSE 系が 5 件ヒットすること
+ラベル
+PARSE
+
+  Kỳ vọng: 🟡  "5 dòng – đang ở 1"  → PARSE
+  Copy lại 4 lần nữa: PARSE_HEAD → PARSE_BODY → PARSE_BODY2 → PARSE_TAIL
+  Copy lần thứ 6: quay lại PARSE  (chạy vòng)
+
+--------------------------------------------------------------------------------
+TC2-02  プレフィックスに数字が続く場合の並び順
+ラベル
+STEP
+
+  Kỳ vọng: 🟡 "4 dòng"  → STEP1 → STEP2 → STEP10 → STEP_LAST
+  Thứ tự là thứ tự DÒNG trong file, KHÔNG phải thứ tự số.
+
+--------------------------------------------------------------------------------
+TC2-03  完全一致のラベル：1 件だけヒットすること
+ラベル
+JOB_END
+
+  Kỳ vọng: 🟢 "1 dòng"
+
+
+================================================================================
+ B. WATCH ĐỔI THEO HÌNH DẠNG DÒNG  (gõ C# khi app hỏi)
+================================================================================
+
+--------------------------------------------------------------------------------
+TC2-04  代入行：右辺も Watch に入ること
+ラベル
+PARSE
+確認値
+分割後、「%FIELD_CNT%」が 3 であること
+
+  gõ khi app hỏi:  csharpLabel = PARSE      csharpVar = fieldCount
+  Kỳ vọng: 🟢 dòng  fieldCount = csvRecord.Split(',').Length;
+           Ctrl+Shift+G → Watch có 2 dòng:
+             fieldCount
+             csvRecord.Split(',').Length
+
+--------------------------------------------------------------------------------
+TC2-05  同一ラベル内で同じ変数が 4 行に出る場合
+ラベル
+PARSE_BODY
+確認値
+「%FIELD_CNT%」の再計算結果を確認する
+
+  gõ khi app hỏi:  csharpLabel = PARSE_BODY   csharpVar = fieldCount
+  Kỳ vọng: 🟡 "4 dòng – đang ở 1". Copy lại 「%FIELD_CNT%」 để duyệt từng dòng.
+           Mỗi dòng Watch KHÁC nhau: dòng gán có vế phải, dòng log chỉ có tên biến.
+
+--------------------------------------------------------------------------------
+TC2-06  定数代入：右辺が数字でも Watch に入ること
+ラベル
+TEXT_CONST
+確認値
+「%RC%」が 0 に初期化されること
+
+  Kỳ vọng: 🟢 dòng  rc = 0;   → Watch:  rc  và  0
+
+
+================================================================================
+ C. BẪY CHUỖI — cắt vế phải phải bỏ qua  //  ;  =  trong nháy
+================================================================================
+
+--------------------------------------------------------------------------------
+TC2-07  URL 文字列（// を含む）
+ラベル
+TEXT_URL
+確認値
+「%URL%」にエンドポイントが設定されていること
+
+  gõ:  TEXT_URL / url
+  Kỳ vọng: Watch phải là  "http://example.com/orders"  ĐỦ CẢ ĐUÔI.
+           Nếu bị cắt thành  "http:  là lỗi cắt ở dấu //
+
+--------------------------------------------------------------------------------
+TC2-08  イコールを含む文字列
+ラベル
+TEXT_MSG
+確認値
+「%MSG%」が status=ok で始まること
+
+  gõ:  TEXT_MSG / msg
+  Kỳ vọng: Watch =  $"status=ok,rc={rc}"   (cắt ở dấu = ĐẦU TIÊN ngoài nháy)
+
+--------------------------------------------------------------------------------
+TC2-09  セミコロンを含む文字列
+ラベル
+TEXT_LIST
+確認値
+「%LIST%」が a;b;c であること
+
+  gõ:  TEXT_LIST / list
+  Kỳ vọng: Watch =  "a;b;c"   (không cắt ở dấu ; trong nháy)
+
+--------------------------------------------------------------------------------
+TC2-10  verbatim 文字列とバックスラッシュ
+ラベル
+TEXT_PATH
+確認値
+「%PATH%」に入力パスが入っていること
+
+  gõ:  TEXT_PATH / path
+  Kỳ vọng: Watch =  @"C:\data\in\orders.csv"   (giữ nguyên @ và dấu \)
+
+--------------------------------------------------------------------------------
+TC2-11  補間＋verbatim（@$）の組み合わせ
+ラベル
+TEXT_UNIT
+確認値
+「%UNIT%」に単位付きの値が入ること
+
+  gõ:  TEXT_UNIT / unit
+  Kỳ vọng: Watch =  @$"{amount}mc/m"   — giữ ĐỦ cả @$ lẫn cặp nháy
+
+--------------------------------------------------------------------------------
+TC2-12  文字列内の二重引用符
+ラベル
+TEXT_QUOTED
+確認値
+「%QUOTED%」に引用符付きの文が入ること
+
+  gõ:  TEXT_QUOTED / quoted
+  Kỳ vọng: Watch giữ nguyên  @"anh ta nói ""xong rồi"" lúc 9h"
+
+--------------------------------------------------------------------------------
+TC2-13  raw 文字列リテラル（"""）
+ラベル
+TRICK_RAW
+確認値
+「%RAW_JSON%」に JSON 文字列が入ること
+
+  gõ:  TRICK_RAW / rawJson
+  Ca KHÓ NHẤT: dòng này có cả """ lẫn " lẫn // lẫn ; lẫn =
+  Kỳ vọng: Watch giữ nguyên cả chuỗi raw. Nếu bị cắt giữa chừng thì báo mình.
+
+--------------------------------------------------------------------------------
+TC2-14  文字列内の "if (" を条件式と誤認しないこと
+ラベル
+TEXT_FAKE_IF
+確認値
+「%NOTE%」が注記文であること
+
+  gõ:  TEXT_FAKE_IF / note
+  Kỳ vọng: coi là dòng GÁN (không phải mệnh đề if) → Watch:  note  và cả chuỗi
+
+
+================================================================================
+ D. VÒNG LẶP — chỉ điều hướng + chụp, KHÔNG sinh lệnh SET
+================================================================================
+
+--------------------------------------------------------------------------------
+TC2-15  for ループ内の累計
+ラベル
+LOOP_FOR
+確認値
+ループ終了後、「%SUM%」が 6 であること
+
+  gõ:  LOOP_FOR / sum
+  Kỳ vọng: đặt breakpoint được, KHÔNG có ô giá trị bypass trên thanh.
+           Log ghi "là vòng lặp — chỉ điều hướng + chụp, không sinh lệnh SET".
+           Breakpoint trong thân for sẽ dừng NHIỀU LẦN, mỗi lần một giá trị.
+
+--------------------------------------------------------------------------------
+TC2-16  while ループ
+ラベル
+LOOP_WHILE
+確認値
+「%TRIES%」が 3 まで増えること
+
+  gõ:  LOOP_WHILE / tries
+
+--------------------------------------------------------------------------------
+TC2-17  do-while ループ
+ラベル
+LOOP_DO
+確認値
+「%IDX%」が 2 になること
+
+  gõ:  LOOP_DO / idx
+
+--------------------------------------------------------------------------------
+TC2-18  foreach ループ
+ラベル
+LOOP_FOREACH
+確認値
+「%JOINED%」が xyz であること
+
+  gõ:  LOOP_FOREACH / joined
+
+
+================================================================================
+ E. CÁC DẠNG MỆNH ĐỀ IF — phần bypass
+================================================================================
+
+--------------------------------------------------------------------------------
+TC2-19  条件式と goto が同一行（列で区別すること）
+ラベル
+IF_SAME_LINE
+確認値
+「if "%RETRY%" NEQ "0"」の分岐に入ること
+
+  gõ:  IF_SAME_LINE / retry != 0
+  Kỳ vọng: 2 breakpoint — dòng if, và CỘT của goto trên CÙNG dòng. Thanh "1/2".
+           Chụp ảnh 1 → app tự set giá trị gợi ý 1 → F5 → chụp ảnh 2.
+  LƯU Ý: BigSample không có hàm SET. Muốn chạy trọn luồng này thì thoát app,
+         thêm vào settings.json:   "IfSetStatement": "retry = {value}"
+
+--------------------------------------------------------------------------------
+TC2-20  条件式と goto が別行
+ラベル
+IF_NEXT_LINE
+確認値
+「if "%READY%" EQU "false"」で分岐すること
+
+  gõ:  IF_NEXT_LINE / !ready
+
+--------------------------------------------------------------------------------
+TC2-21  値を推測できない条件（if exist 相当）
+ラベル
+IF_NO_SUGGEST
+確認値
+「if defined %TOKEN%」の判定結果
+
+  gõ:  IF_NO_SUGGEST / string.IsNullOrEmpty(token)
+  Kỳ vọng: 🟡 app KHÔNG đoán được giá trị bypass → báo để bạn tự set, không đoán bừa.
+
+--------------------------------------------------------------------------------
+TC2-22  比較演算子ごとの推測値
+ラベル
+CODE_GTR
+確認値
+「if %CODE% GTR 5」で分岐すること
+
+  gõ:  CODE_GTR / code > limit
+  Kỳ vọng: gợi ý 6.  Các nhãn cùng họ để thử tiếp:
+           CODE_NEQ (gợi ý 1) · CODE_EQU (7) · CODE_LSS (4) · CODE_GEQ (5) · CODE_LEQ (5)
+
+--------------------------------------------------------------------------------
+TC2-23  bool 単体の条件（比較演算子なし）
+ラベル
+FLAG_PLAIN
+確認値
+「%FLAG%」が true であること
+
+  gõ:  FLAG_PLAIN / flag
+  Kỳ vọng: dòng if chỉ có một biến bool → Watch cả mệnh đề, không gợi ý được giá trị.
+
+
+================================================================================
+ F. HÌNH DẠNG NHÃN
+================================================================================
+
+--------------------------------------------------------------------------------
+TC2-24  ラベルと同一行に文がある場合
+ラベル
+SHAPE_INLINE
+確認値
+「%STAGE%」が 1 であること
+
+  gõ:  SHAPE_INLINE / stage
+  Kỳ vọng: breakpoint đặt NGAY trên dòng nhãn (ExecLine == LabelLine) và VẪN BIND.
+
+--------------------------------------------------------------------------------
+TC2-25  ラベルの直後にコメントと空行がある場合
+ラベル
+SHAPE_AFTER_COMMENT
+確認値
+「%STAGE%」が 2 であること
+
+  gõ:  SHAPE_AFTER_COMMENT / stage
+  Kỳ vọng: breakpoint bỏ qua dòng trống + comment, rơi vào  stage = 2;
+
+--------------------------------------------------------------------------------
+TC2-26  ラベルが連続している場合
+ラベル
+SHAPE_TIGHT
+
+  Kỳ vọng: 🟡 2 nhãn — SHAPE_TIGHT_A và SHAPE_TIGHT_B dính nhau, không có lệnh
+           chen giữa. Cả hai phải trỏ tới cùng một dòng thực thi.
+
+--------------------------------------------------------------------------------
+TC2-27  switch/case をまたぐ変数検索
+ラベル
+SWITCH_AFTER
+確認値
+「%MODE%」が 2 であること
+
+  gõ:  SWITCH_AFTER / mode
+  Kỳ vọng: tìm được. Mấy dòng "case 1:" trông giống nhãn nhưng KHÔNG được
+           tính là hết phạm vi nhãn.
+
+
+================================================================================
+ G. GIỚI HẠN ĐÃ BIẾT — chạy để THẤY giới hạn, không phải để pass
+================================================================================
+
+--------------------------------------------------------------------------------
+TC2-28  似た名前の変数（rc / rc2 / rcTotal）
+ラベル
+NAME_SET
+確認値
+「%RC%」が 0 であること
+
+  gõ:  NAME_SET / rc
+  GIỚI HẠN: tìm biến trong thân nhãn đang so theo kiểu "có chứa", nên "rc" sẽ
+  dính cả dòng của rc2 và rcTotal → ra nhiều dòng hơn mong đợi. Duyệt bằng cách
+  copy lại để tới đúng dòng cần.
+
+--------------------------------------------------------------------------------
+TC2-29  左辺が単純な変数名でない場合
+ラベル
+MEMBER_ARRAY
+確認値
+「%SLOT0%」が 10 であること
+
+  gõ:  MEMBER_ARRAY / slots[0]
+  GIỚI HẠN: vế trái là  slots[0]  chứ không phải tên trần → app KHÔNG nhận là
+  dòng gán, Watch chỉ có  slots[0]  mà KHÔNG kèm vế phải. Đúng như đã biết.
+  Thử thêm:  MEMBER_DICT / map["rc"]     MEMBER_PROP / box.Rc
+
+--------------------------------------------------------------------------------
+TC2-30  複合代入演算子とラムダ
+ラベル
+OPER_COMPOUND
+確認値
+「%OP_ACC%」の累計値
+
+  gõ:  OPER_COMPOUND / opAcc
+  Kỳ vọng:  opAcc += 5;  KHÔNG được coi là dòng gán → Watch chỉ có  opAcc
+  Thử thêm:  OPER_LAMBDA / pick   (dấu => không phải dấu gán)
+
+--------------------------------------------------------------------------------
+TC2-31  複数行にまたがる文
+ラベル
+WRAP_SUM
+確認値
+「%GRAND%」が合計値であること
+
+  gõ:  WRAP_SUM / grand
+  Kỳ vọng: dòng  grand =  không kết thúc bằng ";" nên vế phải là mảnh cụt →
+           Watch CHỈ có  grand, không kèm vế phải. Đúng như thiết kế.
+
+
+================================================================================
+ H. GIÁ TRỊ DÀI — xem ảnh chụp có cắt mất đuôi không
+================================================================================
+
+--------------------------------------------------------------------------------
+TC2-32  長い文字列が Watch で切れないこと
+ラベル
+LONG_TEXT
+確認値
+「%LONG_TEXT%」の全文が確認できること
+
+  gõ:  LONG_TEXT / longText
+  Kỳ vọng: chụp xong MỞ ẢNH RA XEM — giá trị có bị cắt đuôi trong khung không.
+           Bị cắt thì nới vùng chụp bằng Ctrl+Shift+R, hoặc nới cửa sổ Watch.
+
+--------------------------------------------------------------------------------
+TC2-33  長い CSV 行
+ラベル
+LONG_CSV
+確認値
+「%CSV_ROW%」に 1 行分のデータが入ること
+
+  gõ:  LONG_CSV / csvRow
+
+--------------------------------------------------------------------------------
+TC2-34  小数点以下が多い数値
+ラベル
+LONG_NUMBER
+確認値
+「%PRECISE%」の桁が欠けないこと
+
+  gõ:  LONG_NUMBER / preciseAmount
+
+
+================================================================================
+ I. CA NÊN THỬ BẰNG TAY — chưa có trong checklist README
+================================================================================
+
+TC2-35  HAI biến khác nhau trên CÙNG một dòng
+  1. Copy  PARSE        → cuộn tới nhãn PARSE
+  2. Copy  「%CSV_REC%」  → gõ  PARSE / csvRecord  → tới dòng  fieldCount = csvRecord...
+  3. Ctrl+Shift+G
+  4. Copy  「%FIELD_CNT%」 → gõ  PARSE / fieldCount → copy lại cho tới khi về ĐÚNG
+     dòng đó (cùng dòng với bước 2)
+  5. Ctrl+Shift+G
+  Kỳ vọng: Watch phải còn ĐỦ CẢ HAI biến. Mất biến của bước 3 là lỗi quay lại.
+
+TC2-36  Bấm Ctrl+Shift+G khi chương trình CHƯA dừng
+  Kỳ vọng: thanh ghi "chờ F5, Watch tự điền khi dừng". Watch chưa có gì là ĐÚNG.
+
+TC2-37  Bấm Ctrl+Shift+G khi chương trình ĐANG dừng sẵn ở đúng dòng đó
+  Kỳ vọng: Watch điền NGAY, chấm đổi màu, KHÔNG kêu buzz.
+
+TC2-38  Lỡ tay Ctrl+C hai phát thật nhanh
+  Kỳ vọng: thanh KHÔNG nhảy sang dòng kế tiếp.
+
+TC2-39  Copy label khác để sang nhóm mới
+  Kỳ vọng: breakpoint của nhóm cũ bị xoá hết, Watch làm lại từ đầu.
