@@ -74,6 +74,8 @@ VS:     app xoá Watch cũ, thêm đúng biến của dòng đó, kiểm tra (di
 
 - Copy **không bao giờ đụng tới breakpoint**, và không cướp focus khỏi Excel — bạn cứ copy tiếp ô sau.
   Chỉ `Ctrl+Shift+G` mới đặt breakpoint và đưa VS lên trước.
+- Tìm biến khớp theo **tên trọn vẹn**, nên `rc` không dính `rc2` / `rcTotal` / `_rc`. Mệnh đề (vd `rc != 0`)
+  thì khớp theo văn bản, bỏ qua khác biệt khoảng trắng — `if(rc!=0)` vẫn tìm ra.
 - App **không bao giờ tự chạy hay khởi động lại phiên debug**. Mở tool khi chương trình đang debug sẵn; breakpoint đặt
   bằng `Ctrl+Shift+G` sẽ dừng khi chương trình chạy tới.
 - **Mỗi điểm dừng chỉ Watch biến của đúng dòng đó.** 3 biến nằm ở 3 dòng = 3 ảnh, mỗi ảnh 1 biến: đi tới dòng nào thì

@@ -366,6 +366,27 @@ public class MappingTests
         Assert.Empty(Mapping.FindInLabel(src, 1, "rc != 0"));
     }
 
+    static readonly string[] _wordBlock =
+    {
+        "    L:",                          // 1
+        "        rc = 0;",                 // 2
+        "        rc2 = 5;",                // 3  tên dài hơn — KHÔNG được dính khi tìm "rc"
+        "        rcTotal = rc + rc2;",     // 4
+        "        _rc = 1;",                // 5  có tiền tố — cũng không dính
+        "        if (rc != 0) goto E;",    // 6
+    };
+
+    [Fact]
+    public void FindInLabel_matches_a_plain_identifier_on_word_boundaries()
+    {
+        Assert.Equal(new[] { 2, 4, 6 }, Mapping.FindInLabel(_wordBlock, 1, "rc"));
+        Assert.Equal(new[] { 3, 4 }, Mapping.FindInLabel(_wordBlock, 1, "rc2"));
+    }
+
+    [Fact]
+    public void FindInLabel_still_matches_an_expression_as_plain_text()
+        => Assert.Equal(new[] { 6 }, Mapping.FindInLabel(_wordBlock, 1, "rc != 0"));
+
     [Fact]
     public void FindInLabel_no_match_or_empty_expression_gives_nothing()
     {

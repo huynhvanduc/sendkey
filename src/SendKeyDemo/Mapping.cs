@@ -181,6 +181,11 @@ public static class Mapping
 
         var aOne = _ws.Replace(expr.Trim(), " ");
         var aNo = _ws.Replace(expr, "");
+
+        // Định danh thuần so theo BIÊN TỪ, y như SetWatch dùng MatchWholeWord — kẻo "rc" dính "rc2" / "rcTotal".
+        // Biểu thức vẫn so kiểu "có chứa", bỏ qua khác biệt khoảng trắng.
+        var word = IsExpression(expr) ? null : new Regex($@"\b{Regex.Escape(expr.Trim())}\b");
+
         bool inBlock = false;
         for (int ln = firstExec; ln <= lines.Count; ln++)
         {
@@ -191,8 +196,10 @@ public static class Mapping
                 break;                                   // đã sang nhãn / case khác
             if (t.StartsWith("//")) continue;
             if (t.StartsWith("/*")) { if (!t.Contains("*/")) inBlock = true; continue; }
-            if (_ws.Replace(t, " ").Contains(aOne) || _ws.Replace(t, "").Contains(aNo))
-                hits.Add(ln);
+            bool match = word != null
+                ? word.IsMatch(t)
+                : _ws.Replace(t, " ").Contains(aOne) || _ws.Replace(t, "").Contains(aNo);
+            if (match) hits.Add(ln);
         }
         return hits;
     }

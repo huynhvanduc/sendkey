@@ -36,6 +36,22 @@ public class BigSampleTests
         Assert.Equal(new[] { "rc != 0" }, Mapping.WatchFor(lines[35], "rc"));       // dòng if
     }
 
+    // Nhãn NAME_* trong BigSample có rc / rc2 / rcTotal cạnh nhau — tìm "rc" không được dính tên dài hơn.
+    [Fact]
+    public void Plain_identifier_search_does_not_catch_a_longer_name()
+    {
+        var lines = File.ReadAllLines(Path.Combine(Dir, "Program.cs"));
+        var nameSet = Assert.Single(Mapping.FindLabelsByPrefix(lines, "NAME_SET"));
+
+        var rc = Mapping.FindInLabel(lines, nameSet.LabelLine, "rc").Select(ln => lines[ln - 1].Trim()).ToList();
+        Assert.Contains("rc = 0;", rc);
+        Assert.DoesNotContain("rc2 = 5;", rc);
+
+        var rc2 = Mapping.FindInLabel(lines, nameSet.LabelLine, "rc2").Select(ln => lines[ln - 1].Trim()).ToList();
+        Assert.Contains("rc2 = 5;", rc2);
+        Assert.DoesNotContain("rc = 0;", rc2);
+    }
+
     // ---------- mapping.csv khớp code ----------
 
     [Fact]
