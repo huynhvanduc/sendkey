@@ -280,6 +280,15 @@ public static class Mapping
                 DuplicateLines: hits.Select(r => r.SourceLine).ToList());
         return new LookupResult(LookupKind.Ok, hits[0]);
     }
+    /// <summary>
+    /// Cùng một biến, ở cùng một dòng: bấm G lại là làm mới Watch của chính nó. Khoá có cả Item nên
+    /// biến KHÁC ở cùng dòng thì cộng dồn — GroupStops gom lại thành 1 điểm dừng thấy đủ cả hai.
+    /// </summary>
+    public static bool SamePick(StopTarget p, string file, int line, string item)
+        => p.Line == line
+           && string.Equals(p.File, file, StringComparison.OrdinalIgnoreCase)
+           && string.Equals(p.Item, item, StringComparison.OrdinalIgnoreCase);
+
     public static List<StopPoint> GroupStops(IReadOnlyList<StopTarget> targets)
     {
         var fileOrder = targets.Select(t => t.File).Distinct(StringComparer.OrdinalIgnoreCase).ToList();

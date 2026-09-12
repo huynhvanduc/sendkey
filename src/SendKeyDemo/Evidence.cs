@@ -339,8 +339,8 @@ public sealed class EvidenceSession : IDisposable
         var watches = Mapping.WatchFor(h.Line >= 1 && h.Line <= src.Length ? src[h.Line - 1] : "", h.Watch);
         if (watches.Count == 0) watches = new List<string> { "" };   // điều hướng theo label: không Watch gì
 
-        // Chọn lại chính dòng này thì thay hẳn mọi Watch cũ của nó.
-        _picked.RemoveAll(p => string.Equals(p.File, h.File, StringComparison.OrdinalIgnoreCase) && p.Line == h.Line);
+        // Chọn lại CÙNG biến ở CÙNG dòng thì làm mới Watch của chính nó; biến khác ở cùng dòng thì cộng dồn.
+        _picked.RemoveAll(p => Mapping.SamePick(p, h.File, h.Line, h.Item));
 
         int firstNew = _picked.Count;
         foreach (var w in watches)

@@ -830,6 +830,30 @@ public class CopyGroupTests
         Assert.Equal("", stops[1].Condition);          // lệnh đầu nhánh: chỉ chụp
     }
 
+    [Fact]
+    public void Picks_on_one_line_accumulate_per_item_and_end_up_in_one_stop()
+    {
+        // BigSample dòng 34 `rc = inputFile.EndsWith(".csv") ? 0 : 12;` nhắc cả hai biến của test case.
+        const string file = @"C:\p\Program.cs";
+        var picked = new List<StopTarget>();
+        void Pick(int line, string item, params string[] watches)
+        {
+            picked.RemoveAll(p => Mapping.SamePick(p, file, line, item));
+            foreach (var w in watches) picked.Add(new StopTarget(file, line, 32, w, item));
+        }
+
+        Pick(34, "%RC%", "rc", "inputFile.EndsWith(\".csv\") ? 0 : 12");
+        Pick(34, "%INPUT_FILE%", "inputFile");        // biến KHÁC cùng dòng → cộng dồn, không xoá phần của rc
+        var stop = Assert.Single(Mapping.GroupStops(picked));
+        Assert.Equal(new[] { "rc", "inputFile.EndsWith(\".csv\") ? 0 : 12", "inputFile" }, stop.Watch);
+        Assert.Equal(new[] { "%RC%", "%RC%", "%INPUT_FILE%" }, stop.Items);
+
+        Pick(34, "%RC%", "rc", "inputFile.EndsWith(\".csv\") ? 0 : 12");   // bấm lại CÙNG biến → không nhân đôi
+        stop = Assert.Single(Mapping.GroupStops(picked));
+        Assert.Equal(3, stop.Watch.Count);
+        Assert.Contains("inputFile", stop.Watch);
+    }
+
     [Theory]
     [InlineData("if \"%RC%\" NEQ \"0\"", "RC", "1")]
     [InlineData("if \"%RC%\" NEQ \"8\"", "RC", "0")]
