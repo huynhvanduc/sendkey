@@ -25,6 +25,10 @@ static class Steps
         Console.WriteLine($"AUDIT_LOG: {message}");
     }
 
+    // Không có nhãn — chỉ để Program.cs có một lời gọi trải nhiều dòng.
+    public static int CheckRange(int value, int lo, int hi)
+        => value >= lo && value <= hi ? 0 : 88;
+
     public static int Rollback(int inRc)
     {
         int rc = inRc;
