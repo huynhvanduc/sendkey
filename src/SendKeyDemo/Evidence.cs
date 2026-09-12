@@ -172,16 +172,26 @@ public sealed class EvidenceSession : IDisposable
         if (!_active) return;
 
         int n = _stops.Count;
-        if (_bpFiles.Count > 0 && _host.CurrentDte() is { } dte)
+        string watchNote = "";
+        if (_host.CurrentDte() is { } dte)
+        {
             try { foreach (var f in _bpFiles) VsAutomation.ClearBreakpointsInFile(dte, f); }
             catch (Exception ex) { Block("Lỗi xoá breakpoint: " + ex.Message); return; }
+
+            // Bỏ nhóm thì Watch cũng phải sạch. Nhưng Watch chỉ thao tác được khi VS đang dừng, nên không
+            // xoá được thì phải NÓI THẬT kẻo user tưởng đã sạch — dù đó là giới hạn của VS, không phải lỗi
+            // thao tác, nên vẫn để Idle chứ không báo đỏ.
+            watchNote = !VsAutomation.InBreakMode(dte) ? " · Watch chỉ xoá được khi đang dừng"
+                : VsAutomation.ClearWatchAll(dte) ? " · đã làm sạch Watch"
+                : " · không xoá được Watch, xoá tay giúp";
+        }
 
         _picked.Clear();
         _items.Clear();
         ResetStops();
         _bpFiles.Clear();
 
-        var msg = n > 0 ? $"đã xoá {n} điểm dừng" : "không có điểm dừng nào để xoá";
+        var msg = (n > 0 ? $"đã xoá {n} điểm dừng" : "không có điểm dừng nào để xoá") + watchNote;
         _bar.SetPair(_cmdLabel, _items, msg);
         _bar.SetStatus(StripState.Idle, null);
         _host.Log("Chụp: " + msg + " — copy lại label/biến rồi bấm " + _settings.GotoCurrentHotkey + ".");

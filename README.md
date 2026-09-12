@@ -136,7 +136,7 @@ chỉ lấy cặp trông như biến batch (`%X%`, `!X!`, `if …`, `goto …`),
 | `Ctrl+Shift+S` | Trong đợt: chụp bằng chứng vào clipboard. Ngoài đợt: chụp vùng đã nhớ, lưu PNG |
 | `Ctrl+Shift+F` | Chụp toàn màn hình, lưu PNG |
 | `Ctrl+Shift+W` | Chụp cửa sổ đang active, lưu PNG |
-| `Ctrl+Shift+D` | Xóa breakpoint app đã đặt + quên nhóm đang chọn. Ngoài đợt: xóa breakpoint trong class đang debug |
+| `Ctrl+Shift+D` | Xóa breakpoint app đã đặt + làm sạch Watch + quên nhóm đang chọn. Ngoài đợt: xóa breakpoint trong class đang debug |
 
 Phím của app là phím toàn cục: lúc app chạy, nó đè phím cùng tổ hợp của VS — `Ctrl+Shift+S` (Save All),
 `Ctrl+Shift+F` (Find in Files), `Ctrl+Shift+D` (phím mở đầu chord của menu Debug). Đổi phím trong
@@ -204,7 +204,8 @@ App không bao giờ tự gõ phím vào VS, để khỏi gõ nhầm vào file `
 | 16b | Khi đang dừng sẵn ở dòng 34, bấm `Ctrl+Shift+G` lần nữa | Watch điền **ngay** (không phải chờ F5), chấm chuyển màu theo kết quả chấm, và **không** kêu buzz |
 | 16c | Vẫn đang dừng ở dòng 34, copy `「%HDR_OK%」` để sang `VALIDATE_HEADER`, bấm `Ctrl+Shift+G` | Watch đổi sang `headerOk` **ngay**, dù mũi tên vàng vẫn ở dòng 34. Thanh ghi `Watch đã điền · chờ F5 tới dòng này`, chấm **không** đỏ |
 | 16d | Vẫn đang dừng trong `Program.cs`, copy `RECALC` rồi `「%AMT%」` (2 dòng này pin `csharpFile=Steps.cs`), rồi copy lại `CHECK_INPUT` | `CHECK_INPUT` vẫn tra trong **`Program.cs`** — mốc là file có mũi tên vàng, không trôi sang `Steps.cs` sau khi vừa điều hướng qua đó |
-| 16e | Bấm `Ctrl+Shift+D` | Breakpoint app đặt biến hết; thanh ghi `đã xoá N điểm dừng`, chấm về xám. Bấm lần nữa → `không có điểm dừng nào để xoá`. Breakpoint bạn TỰ đặt ở file khác **không** bị xóa |
+| 16e | Khi ĐANG DỪNG, bấm `Ctrl+Shift+D` | Breakpoint app đặt biến hết **và cửa sổ Watch sạch**; thanh ghi `đã xoá N điểm dừng · đã làm sạch Watch`, chấm về xám. Bấm lần nữa → `không có điểm dừng nào để xoá · …`. Breakpoint bạn TỰ đặt ở file khác **không** bị xóa |
+| 16f | Cho chương trình chạy tiếp (không còn dừng) rồi bấm `Ctrl+Shift+D` | Breakpoint vẫn sạch, nhưng Watch giữ nguyên và thanh nói rõ `Watch chỉ xoá được khi đang dừng` — VS không cho sửa Watch lúc không dừng. Chấm **không** đỏ |
 | 17 | Bấm `Ctrl+Shift+S` khi chưa chạy | Buzz, không có ảnh, báo `❌ Chưa dừng ở breakpoint…` |
 | 18 | Cho chương trình (đang debug sẵn) chạy tới dòng 34 | Watch 1 chỉ còn `rc` và `inputFile.EndsWith(".csv") ? 0 : 12` (dòng cũ bị xoá) — dòng gán nên có cả vế phải; ding; chấm xanh lá. App không tự chạy / khởi động lại debug |
 | 19 | Bấm `Ctrl+Shift+S` | Ding; cửa sổ lúc copy nổi lên; Ctrl+V ra ảnh; thanh `✓ đủ 1 ảnh` |

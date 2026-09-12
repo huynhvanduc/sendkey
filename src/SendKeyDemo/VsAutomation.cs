@@ -355,6 +355,18 @@ public static class VsAutomation
         return missed;
     }
 
+    /// <summary>Làm sạch cửa sổ Watch. Chỉ được khi VS đang dừng — ngoài break mode Watch không thao tác được.</summary>
+    public static bool ClearWatchAll(DTE dte)
+    {
+        if (!InBreakMode(dte)) return false;
+        try
+        {
+            dte.ExecuteCommand("Debug.Watch1");
+            return WatchTree(dte) is { } tree && ClearWatch(dte, tree);
+        }
+        catch (Exception) { return false; }
+    }
+
     public static List<string>? ReadWatchNames(DTE dte)
     {
         try { return WatchTree(dte) is { } tree ? WatchItems(tree).Select(i => i.Current.Name).ToList() : null; }
