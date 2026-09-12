@@ -282,6 +282,98 @@ public class MappingTests
         Assert.Equal(LabelLineKind.AnchorNotFound, r.Kind);
     }
 
+    static readonly string[] _prefixBlock =
+    {
+        "    CHECK_INPUT:",                        // 1
+        "        rc = 0;",                         // 2
+        "    CHECK_INPUT_aa:",                     // 3
+        "        rc = 1;",                         // 4
+        "    CHECK_INPUT_aa2:",                    // 5
+        "        goto CHECK_INPUT_aa;",            // 6  (không phải khai báo label)
+        "    END_PROC:",                           // 7
+        "        return;",                         // 8
+    };
+
+    [Fact]
+    public void FindLabelsByPrefix_matches_exact_name_and_suffixed_names_in_line_order()
+    {
+        var hits = Mapping.FindLabelsByPrefix(_prefixBlock, "CHECK_INPUT");
+        Assert.Equal(new[] { 1, 3, 5 }, hits.Select(h => h.LabelLine));
+        Assert.Equal(new[] { "CHECK_INPUT", "CHECK_INPUT_aa", "CHECK_INPUT_aa2" }, hits.Select(h => h.Name));
+    }
+
+    [Fact]
+    public void FindLabelsByPrefix_single_match_gives_the_real_label_name()
+    {
+        var hit = Assert.Single(Mapping.FindLabelsByPrefix(_prefixBlock, "CHECK_INPUT_aa2"));
+        Assert.Equal(new LabelHit(5, 6, "CHECK_INPUT_aa2"), hit);
+    }
+
+    static readonly string[] _execBlock =
+    {
+        "    L_aa1: rc = 0;",                      // 1  lệnh ngay sau dấu hai chấm
+        "    L_aa2:",                              // 2
+        "",                                        // 3
+        "        // ghi chú",                      // 4
+        "        {",                               // 5
+        "        rc = 1;",                         // 6
+        "    L_aa3:",                              // 7  sau nhãn không còn dòng thực thi
+        "        // hết",                          // 8
+    };
+
+    [Fact]
+    public void FindLabelsByPrefix_exec_line_is_the_first_runnable_line_after_the_label()
+    {
+        // breakpoint phải rơi vào ExecLine; đặt ở dòng nhãn thì VS không bind, chương trình chạy thẳng
+        var hits = Mapping.FindLabelsByPrefix(_execBlock, "L_aa");
+        Assert.Equal(new[] { 1, 2, 7 }, hits.Select(h => h.LabelLine));
+        Assert.Equal(new[] { 1, 6, 0 }, hits.Select(h => h.ExecLine));
+    }
+
+    [Fact]
+    public void FindLabelsByPrefix_no_match_and_empty_prefix_give_nothing()
+    {
+        Assert.Empty(Mapping.FindLabelsByPrefix(_prefixBlock, "NOSUCH"));
+        Assert.Empty(Mapping.FindLabelsByPrefix(_prefixBlock, ""));
+        Assert.Empty(Mapping.FindLabelsByPrefix(_prefixBlock, "   "));
+    }
+
+    static readonly string[] _searchBlock =
+    {
+        "    L:",                                  // 1
+        "        rc = 0;",                         // 2
+        "        // if (rc != 0) goto SKIP;",      // 3  comment thường
+        "        /* rc != 0 */",                   // 4  comment khối 1 dòng
+        "        if (rc != 0) goto A;",            // 5
+        "        x = 1;",                          // 6
+        "        if(rc!=0) goto B;",               // 7  khác khoảng trắng, vẫn khớp
+        "    M:",                                  // 8
+        "        if (rc != 0) goto C;",            // 9  đã sang label khác
+    };
+
+    [Fact]
+    public void FindInLabel_returns_every_matching_line_in_the_label()
+        => Assert.Equal(new[] { 5, 7 }, Mapping.FindInLabel(_searchBlock, 1, "rc != 0"));
+
+    [Fact]
+    public void FindInLabel_stops_before_the_next_label()
+        => Assert.Equal(new[] { 9 }, Mapping.FindInLabel(_searchBlock, 8, "rc != 0"));
+
+    [Fact]
+    public void FindInLabel_ignores_matches_inside_comments()
+    {
+        var src = new[] { "  L:", "  // rc != 0", "  /*", "  rc != 0", "  */", "  a = 1;" };
+        Assert.Empty(Mapping.FindInLabel(src, 1, "rc != 0"));
+    }
+
+    [Fact]
+    public void FindInLabel_no_match_or_empty_expression_gives_nothing()
+    {
+        Assert.Empty(Mapping.FindInLabel(_searchBlock, 1, "zz == 9"));
+        Assert.Empty(Mapping.FindInLabel(_searchBlock, 1, ""));
+        Assert.Empty(Mapping.FindInLabel(_searchBlock, 99, "rc != 0"));
+    }
+
     [Theory]
     [InlineData("rc", false)]
     [InlineData("order.Total", false)]
@@ -695,6 +787,26 @@ public class CopyGroupTests
     [InlineData("%RC%")]
     public void IfClause_unrecognized_gives_no_suggestion(string clause)
         => Assert.Null(IfClause.Suggest(clause));
+
+    [Theory]
+    [InlineData("for %%i in (*.csv) do call :PROC %%i", true)]
+    [InlineData("FOR /L %%n IN (1,1,3) DO echo %%n", true)]
+    [InlineData("while (rc == 0)", true)]
+    [InlineData("do echo x", true)]
+    [InlineData("if \"%RC%\" NEQ \"0\"", false)]
+    [InlineData("forfiles /p C:\\tmp", false)]
+    [InlineData("%RC%", false)]
+    [InlineData("", false)]
+    public void IsLoop_only_catches_loop_clauses(string item, bool expected)
+        => Assert.Equal(expected, IfClause.IsLoop(item));
+
+    [Fact]
+    public void IfClause_gives_no_bypass_for_a_loop_clause()
+    {
+        // vòng lặp chỉ điều hướng + chụp; đừng sinh SET dù bên trong có mệnh đề so sánh
+        Assert.Null(IfClause.Suggest("for %%i in (1 2) do if \"%RC%\" NEQ \"0\" goto :ERR"));
+        Assert.Null(IfClause.Suggest("do if \"%RC%\" NEQ \"0\" goto :ERR"));
+    }
 
     [Fact]
     public void IfClause_statement_fills_template()

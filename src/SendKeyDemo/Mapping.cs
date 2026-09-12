@@ -17,6 +17,9 @@ public record StopPoint(string File, int Line, int LabelLine, IReadOnlyList<stri
 
 public record StopTarget(string File, int Line, int LabelLine, string Watch, string Item, int Column = 0, string Condition = "");
 
+/// <summary>LabelLine = dòng khai báo nhãn (để cuộn/bôi đen); ExecLine = dòng thực thi đầu để đặt breakpoint, 0 nếu không có.</summary>
+public record LabelHit(int LabelLine, int ExecLine, string Name);
+
 public record LookupResult(
     LookupKind Kind,
     MapRow? Row = null,
@@ -147,26 +150,51 @@ public static class Mapping
         if (firstExec == 0) return new LabelLineResult(LabelLineKind.NoExecutableLine);
 
         if (IsExpression(anchorExpr))
-        {
-            var aOne = _ws.Replace(anchorExpr!.Trim(), " ");
-            var aNo = _ws.Replace(anchorExpr!, "");
-            bool inBlock = false;
-            for (int ln = firstExec; ln <= lines.Count; ln++)
-            {
-                var raw = lines[ln - 1];
-                var t = raw.Trim();
-                if (inBlock) { if (t.Contains("*/")) inBlock = false; continue; }
-                if (ln != firstExec && _anyLabel.IsMatch(raw) && t != "default:" && !t.StartsWith("case "))
-                    break;                                   // đã sang nhãn / case khác
-                if (t.StartsWith("//")) continue;
-                if (t.StartsWith("/*")) { if (!t.Contains("*/")) inBlock = true; continue; }
-                if (_ws.Replace(t, " ").Contains(aOne) || _ws.Replace(t, "").Contains(aNo))
-                    return new LabelLineResult(LabelLineKind.Ok, ln, LabelLine: matches[0]);
-            }
-            return new LabelLineResult(LabelLineKind.AnchorNotFound);
-        }
+            return FindInLabel(lines, matches[0], anchorExpr!) is { Count: > 0 } found
+                ? new LabelLineResult(LabelLineKind.Ok, found[0], LabelLine: matches[0])
+                : new LabelLineResult(LabelLineKind.AnchorNotFound);
 
         return new LabelLineResult(LabelLineKind.Ok, firstExec, LabelLine: matches[0]);
+    }
+
+    /// <summary>Mọi label bắt đầu bằng prefix — khớp cả tên y hệt lẫn tên có hậu tố (_aa → _aa, _aa1), theo thứ tự dòng.</summary>
+    public static List<LabelHit> FindLabelsByPrefix(IReadOnlyList<string> lines, string prefix)
+    {
+        var hits = new List<LabelHit>();
+        if (string.IsNullOrWhiteSpace(prefix)) return hits;
+
+        var rx = new Regex($@"^\s*({Regex.Escape(prefix.Trim())}\w*)\s*:");
+        for (int i = 0; i < lines.Count; i++)
+            if (rx.Match(lines[i]) is { Success: true } m)
+                hits.Add(new LabelHit(i + 1, FirstExecLine(lines, i + 1), m.Groups[1].Value));
+        return hits;
+    }
+
+    /// <summary>Mọi dòng trong thân label khớp biểu thức: từ dòng thực thi đầu tới trước label/case kế tiếp, bỏ comment.</summary>
+    public static List<int> FindInLabel(IReadOnlyList<string> lines, int labelLine, string expr)
+    {
+        var hits = new List<int>();
+        if (string.IsNullOrWhiteSpace(expr) || labelLine < 1 || labelLine > lines.Count) return hits;
+
+        int firstExec = FirstExecLine(lines, labelLine);
+        if (firstExec == 0) return hits;
+
+        var aOne = _ws.Replace(expr.Trim(), " ");
+        var aNo = _ws.Replace(expr, "");
+        bool inBlock = false;
+        for (int ln = firstExec; ln <= lines.Count; ln++)
+        {
+            var raw = lines[ln - 1];
+            var t = raw.Trim();
+            if (inBlock) { if (t.Contains("*/")) inBlock = false; continue; }
+            if (ln != firstExec && _anyLabel.IsMatch(raw) && t != "default:" && !t.StartsWith("case "))
+                break;                                   // đã sang nhãn / case khác
+            if (t.StartsWith("//")) continue;
+            if (t.StartsWith("/*")) { if (!t.Contains("*/")) inBlock = true; continue; }
+            if (_ws.Replace(t, " ").Contains(aOne) || _ws.Replace(t, "").Contains(aNo))
+                hits.Add(ln);
+        }
+        return hits;
     }
 
     static int FirstExecLine(IReadOnlyList<string> lines, int labelLineNo)
@@ -393,10 +421,17 @@ public static class IfClause
         @"(?<op>==|equ|neq|lss|leq|gtr|geq)\s*(?:""(?<x1>[^""]*)""|(?<x2>[^\s""]+))",
         RegexOptions.IgnoreCase);
 
+    static readonly Regex _loop = new(@"^(for|while|do)\b", RegexOptions.IgnoreCase);
+
     public static bool IsIf(string? item) => _if.IsMatch((item ?? "").Trim());
+
+    /// <summary>Mệnh đề vòng lặp: chỉ điều hướng + chụp, không bao giờ sinh lệnh SET để bypass.</summary>
+    public static bool IsLoop(string? item) => _loop.IsMatch((item ?? "").Trim());
 
     public static IfBypass? Suggest(string? item)
     {
+        if (IsLoop(item)) return null;
+
         var m = _cmp.Match((item ?? "").Trim());
         if (!m.Success) return null;
 
