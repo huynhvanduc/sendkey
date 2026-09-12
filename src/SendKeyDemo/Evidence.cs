@@ -18,7 +18,6 @@ public sealed class EvidenceSession : IDisposable
     readonly List<string> _items = new();
     string? _askingItem;
 
-    /// <summary>Một chỗ có thể dừng, dựng lại sau mỗi lần copy. Line = dòng đặt breakpoint, LabelLine = dòng nhãn để cuộn.</summary>
     record NavHit(string Item, string Watch, string File, int LabelLine, int Line);
 
     string _navKey = "";
@@ -52,7 +51,6 @@ public sealed class EvidenceSession : IDisposable
 
     string TcId => _cmdLabel + string.Concat(_items.Select(i => $"「{i}」"));
 
-    /// <summary>Bắt đầu đợt: hiện thanh, nghe clipboard, bám sự kiện VS dừng.</summary>
     public void Start()
     {
         Stop(keepBar: true);
@@ -103,7 +101,6 @@ public sealed class EvidenceSession : IDisposable
         if (!keepBar) _bar.Hide();
     }
 
-    /// <summary>Gắn lại sự kiện break khi đổi instance VS (hoặc VS vừa mở lại).</summary>
     public void AttachWatcher()
     {
         _watcher?.Dispose();
@@ -166,7 +163,6 @@ public sealed class EvidenceSession : IDisposable
         ShowNav(same);
     }
 
-    /// <summary>Phím xoá breakpoint: dọn đúng những file app đã đụng, rồi cho nhóm bắt đầu lại sạch.</summary>
     public void ClearBreakpoints()
     {
         if (!_active) return;
@@ -197,7 +193,6 @@ public sealed class EvidenceSession : IDisposable
         _host.Log("Chụp: " + msg + " — copy lại label/biến rồi bấm " + _settings.GotoCurrentHotkey + ".");
     }
 
-    /// <summary>Label khác = nhóm mới: quên chỗ đã chọn và xoá breakpoint của nhóm cũ.</summary>
     void StartGroup()
     {
         _picked.Clear();
@@ -209,7 +204,6 @@ public sealed class EvidenceSession : IDisposable
         _bpFiles.Clear();
     }
 
-    /// <summary>Mọi nhãn khớp label vừa copy. Không có dòng mapping thì tìm trong class đang debug.</summary>
     List<NavHit> BuildLabelNav(string label)
     {
         var nav = new List<NavHit>();
@@ -231,7 +225,6 @@ public sealed class EvidenceSession : IDisposable
         return nav;
     }
 
-    /// <summary>Mọi dòng có biến, TRONG chính nhãn đang đứng. 「goto :X」 thì điều hướng tới nhãn X, không Watch.</summary>
     List<NavHit> BuildVarNav(IReadOnlyList<string> items)
     {
         var nav = new List<NavHit>();
@@ -287,7 +280,6 @@ public sealed class EvidenceSession : IDisposable
         return nav;
     }
 
-    /// <summary>Cuộn + bôi đen chỗ đang chọn, báo tìm được mấy chỗ. Không cướp focus: user còn đang copy ở Excel.</summary>
     void ShowNav(bool same)
     {
         if (_nav.Count == 0)
@@ -320,7 +312,6 @@ public sealed class EvidenceSession : IDisposable
         }
     }
 
-    /// <summary>Enter trong ô C# trên thanh: kiểm với code, ghi thêm dòng vào mapping.csv rồi chạy luôn như G.</summary>
     void OnInputSubmitted(string csLabel, string csVar)
     {
         if (!_active || _askingItem is not { } item) return;
@@ -345,7 +336,6 @@ public sealed class EvidenceSession : IDisposable
 
     // ---------------- G: đặt breakpoint ----------------
 
-    /// <summary>Hotkey G, hoặc Enter sau khi gõ C#: đặt breakpoint cho mọi dòng cần chụp, mở đúng tab, đưa VS lên.</summary>
     public void Run()
     {
         if (!_active) return;
@@ -511,7 +501,6 @@ public sealed class EvidenceSession : IDisposable
         return result;
     }
 
-    /// <summary>Phím chụp: làm mới Watch rồi chấm; đỏ thì không ra ảnh, vàng thì bấm lần nữa mới chụp.</summary>
     public void CaptureCurrent()
     {
         if (!_active) return;
@@ -709,9 +698,7 @@ public sealed class EvidenceBarForm : Form
     StripState _state = StripState.Idle;
     bool _labelOnly;
 
-    /// <summary>Enter trong ô nhập: (csharpLabel, csharpVar); ca goto thì csharpVar = "".</summary>
     public event Action<string, string>? InputSubmitted;
-    /// <summary>Enter trong ô giá trị (<see cref="AskValue"/>): giá trị mới để chạy lại lệnh SET.</summary>
     public event Action<string>? ValueSubmitted;
     public event Action? OpenConfigRequested;
 
@@ -930,7 +917,6 @@ public sealed class ClipboardWatcher : NativeWindow, IDisposable
     [DllImport("user32.dll", SetLastError = true)] static extern bool AddClipboardFormatListener(IntPtr hwnd);
     [DllImport("user32.dll", SetLastError = true)] static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
 
-    /// <summary>Text mà chính app vừa đẩy vào clipboard — bỏ qua để không tự kích hoạt mình.</summary>
     public string? IgnoreText { get; set; }
 
     public event Action<string>? TextCopied;

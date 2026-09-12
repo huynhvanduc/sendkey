@@ -54,7 +54,6 @@ public static class VsAutomation
         return list;
     }
 
-    /// <summary>select = bôi đen cả dòng; activate = false thì chỉ đổi tab trong VS, không raise VS đè lên Excel.</summary>
     public static string GoToLine(DTE dte, string file, int line, bool select = false, bool activate = true)
     {
         if (!File.Exists(file)) return $"file không tồn tại: {file}";
@@ -69,7 +68,7 @@ public static class VsAutomation
             : $"đã tới {Path.GetFileName(file)}:{reached} (file chỉ có {reached} dòng)";
     }
 
-    /// <summary>File .cs đang mở trong VS. Đi thẳng ActiveDocument: ActiveWindow trả null khi cửa sổ Watch đang active.</summary>
+    // Đi thẳng ActiveDocument: DTE.ActiveWindow trả null khi cửa sổ Watch đang active.
     public static string? ActiveFile(DTE dte)
     {
         try { return dte.ActiveDocument?.FullName; }
@@ -304,11 +303,8 @@ public static class VsAutomation
         if (hwnd != IntPtr.Zero) SetForegroundWindow(hwnd);
     }
 
-    /// <summary>
-    /// "Class hiện tại đang debug": đang dừng thì lấy file có mũi tên vàng, không thì file đang mở.
-    /// KHÔNG được dùng ActiveFile làm mốc lúc đang dừng — GoToLine tự đổi tab active, nên mốc sẽ trôi
-    /// sang class khác ngay sau khi điều hướng tới một dòng pin csharpFile của file đó.
-    /// </summary>
+    // ĐỪNG dùng ActiveFile làm mốc khi đang dừng: GoToLine gọi win.Activate() nên chính app đổi tab
+    // active → điều hướng tới một dòng pin csharpFile của class khác là mốc trôi sang đó, không tự về.
     public static string? CurrentClassFile(DTE dte)
     {
         try
@@ -355,7 +351,6 @@ public static class VsAutomation
         return missed;
     }
 
-    /// <summary>Làm sạch cửa sổ Watch. Chỉ được khi VS đang dừng — ngoài break mode Watch không thao tác được.</summary>
     public static bool ClearWatchAll(DTE dte)
     {
         if (!InBreakMode(dte)) return false;

@@ -460,7 +460,6 @@ public class MainForm : Form
             $"{_settings.GotoCurrentHotkey} đặt breakpoint   ·   {_settings.CaptureRegionHotkey} chụp   ·   " +
             $"{_settings.ClearBreakpointsHotkey} xóa breakpoint";
 
-    /// <summary>Nút chính — vào thẳng chế độ copy từ Excel, không qua hộp thoại nào.</summary>
     void StartClipboardMode()
     {
         if (_evidence == null) return;
@@ -528,7 +527,6 @@ public class MainForm : Form
         return failed.Count > 0 ? "không đăng ký được: " + string.Join("; ", failed) : null;
     }
 
-    /// <summary>Phím xoá breakpoint: trong đợt thì dọn theo nhóm, ngoài đợt thì dọn file đang debug.</summary>
     void ClearBreakpointsHotkey()
     {
         if (_evidence is { Active: true } session) { session.ClearBreakpoints(); return; }
@@ -562,7 +560,6 @@ public class MainForm : Form
             Log("Mẹo: điền ClipboardWidthInches / ClipboardHeightInches trong settings.json để khung chụp luôn cùng một cỡ.");
     }
 
-    /// <summary>Phím chụp: đang trong đợt bằng chứng thì chụp CÓ GÁC CỔNG, ngoài đợt thì chụp thường.</summary>
     void CaptureHotkey()
     {
         if (_evidence is { Active: true } session) { session.CaptureCurrent(); return; }

@@ -83,7 +83,6 @@ public class BigSampleTests
 
     record Block(string Tc, string LabelLine, string VarLine);
 
-    /// <summary>Bóc các khối TC: dòng ngay sau "ラベル" là label, ngay sau "確認値" là câu chứa 「 」.</summary>
     static List<Block> ReadBlocks()
     {
         var lines = File.ReadAllLines(Path.Combine(Dir, "tc-input-jp.txt"));

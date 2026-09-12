@@ -5,10 +5,6 @@ using System.Runtime.InteropServices;
 
 namespace SendKeyDemo;
 
-/// <summary>
-/// Chụp một vùng màn hình vào Clipboard (và tùy chọn lưu PNG). Tách khỏi UI để
-/// cả hotkey chụp thường lẫn chụp bằng chứng dùng chung một đường.
-/// </summary>
 public static class ScreenCapture
 {
     public record Result(bool Ok, string Message, string FilePath);
@@ -669,11 +665,6 @@ public sealed class CaptureFlyoutForm : Form
 
 // ==================== LayeredSurface ====================
 
-/// <summary>
-/// Đẩy một Bitmap (Format32bppArgb) lên cửa sổ WS_EX_LAYERED qua UpdateLayeredWindow.
-/// Hàm này tự lo cả vị trí + kích thước cửa sổ trong cùng 1 lệnh — rẻ hơn nhiều so với
-/// việc set Form.Bounds (SetWindowPos) rồi để hệ thống tự phát WM_PAINT riêng.
-/// </summary>
 internal static class LayeredSurface
 {
     public static void Update(IntPtr hwnd, Bitmap frame, Point screenLocation)

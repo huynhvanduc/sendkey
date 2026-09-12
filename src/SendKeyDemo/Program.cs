@@ -112,7 +112,6 @@ public sealed class AppSettings
         }
     }
 
-    /// <summary>Thư mục lưu ảnh thực tế: dùng SaveFolder nếu hợp lệ, ngược lại rơi về %TEMP%.</summary>
     [JsonIgnore]
     public string ResolvedSaveFolder
     {
@@ -133,7 +132,6 @@ public sealed class AppSettings
 
     const int ClipboardDpi = 96;   // DPI mặc định của GDI+/Office khi không có metadata khác
 
-    /// <summary>Kích thước pixel quy đổi từ ClipboardWidth/HeightInches; null nếu chưa cấu hình.</summary>
     [JsonIgnore]
     public Size? ClipboardPixelSize
     {
@@ -149,10 +147,6 @@ public sealed class AppSettings
 
 // ==================== HotkeyParser ====================
 
-/// <summary>
-/// Parse chuỗi hotkey dạng "Ctrl+Alt+R" (từ settings.json) thành (Mod, Keys)
-/// dùng được với HotkeyWindow.Register.
-/// </summary>
 public static class HotkeyParser
 {
     public static bool TryParse(string spec, out HotkeyWindow.Mod modifiers, out Keys key)
@@ -190,11 +184,6 @@ public static class HotkeyParser
 
 // ==================== HotkeyWindow ====================
 
-/// <summary>
-/// Cửa sổ VÔ HÌNH chỉ để nhận message WM_HOTKEY của Windows.
-/// RegisterHotKey cần một handle cửa sổ để gửi message tới — NativeWindow
-/// cho ta handle đó mà không cần vẽ Form thật.
-/// </summary>
 public sealed class HotkeyWindow : NativeWindow, IDisposable
 {
     private const int WM_HOTKEY = 0x0312;
@@ -219,7 +208,6 @@ public sealed class HotkeyWindow : NativeWindow, IDisposable
         CreateHandle(new CreateParams());
     }
 
-    /// <summary>Đăng ký 1 tổ hợp phím. Trả về true nếu thành công.</summary>
     public bool Register(Mod modifiers, Keys key, Action onPressed)
     {
         int id = _nextId++;

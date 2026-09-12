@@ -17,10 +17,8 @@ public record StopPoint(string File, int Line, int LabelLine, IReadOnlyList<stri
 
 public record StopTarget(string File, int Line, int LabelLine, string Watch, string Item, int Column = 0, string Condition = "");
 
-/// <summary>LabelLine = dòng khai báo nhãn (để cuộn/bôi đen); ExecLine = dòng thực thi đầu để đặt breakpoint, 0 nếu không có.</summary>
 public record LabelHit(int LabelLine, int ExecLine, string Name);
 
-/// <summary>Kết quả nút "Kiểm tra": Unchecked là dòng chưa soát được vì file chứa nhãn không đang mở.</summary>
 public record ValidateResult(List<string> Problems, int Ok, int Unchecked);
 
 public record LookupResult(
@@ -160,7 +158,6 @@ public static class Mapping
         return new LabelLineResult(LabelLineKind.Ok, firstExec, LabelLine: matches[0]);
     }
 
-    /// <summary>Mọi label bắt đầu bằng prefix — khớp cả tên y hệt lẫn tên có hậu tố (_aa → _aa, _aa1), theo thứ tự dòng.</summary>
     public static List<LabelHit> FindLabelsByPrefix(IReadOnlyList<string> lines, string prefix)
     {
         var hits = new List<LabelHit>();
@@ -173,7 +170,6 @@ public static class Mapping
         return hits;
     }
 
-    /// <summary>Mọi dòng trong thân label khớp biểu thức: từ dòng thực thi đầu tới trước label/case kế tiếp, bỏ comment.</summary>
     public static List<int> FindInLabel(IReadOnlyList<string> lines, int labelLine, string expr)
     {
         var hits = new List<int>();
@@ -229,11 +225,6 @@ public static class Mapping
         return 0;
     }
 
-    /// <summary>
-    /// Một mapping.csv dùng chung cho nhiều class, nên dòng KHÔNG pin csharpFile chỉ soát được với file
-    /// đang mở trong VS — không khớp ở đó là CHƯA KIỂM ĐƯỢC, không phải lỗi. Với những dòng đó, lỗi duy
-    /// nhất còn chắc chắn là trùng cặp cmdLabel+cmdVar, vì nó không phụ thuộc file nào.
-    /// </summary>
     public static ValidateResult Validate(IReadOnlyList<MapRow> rows, Func<MapRow, IReadOnlyList<string>?> linesFor)
     {
         var problems = new List<string>();
@@ -316,10 +307,7 @@ public static class Mapping
                 DuplicateLines: hits.Select(r => r.SourceLine).ToList());
         return new LookupResult(LookupKind.Ok, hits[0]);
     }
-    /// <summary>
-    /// Cùng một biến, ở cùng một dòng: bấm G lại là làm mới Watch của chính nó. Khoá có cả Item nên
-    /// biến KHÁC ở cùng dòng thì cộng dồn — GroupStops gom lại thành 1 điểm dừng thấy đủ cả hai.
-    /// </summary>
+    // Khoá PHẢI có Item: thiếu nó thì bấm G cho biến thứ hai ở cùng dòng sẽ xoá sạch biến thứ nhất.
     public static bool SamePick(StopTarget p, string file, int line, string item)
         => p.Line == line
            && string.Equals(p.File, file, StringComparison.OrdinalIgnoreCase)
@@ -377,11 +365,8 @@ public static class Mapping
         return null;
     }
 
-    /// <summary>
-    /// Watch nên điền cho một dòng, theo hình dạng dòng đó: dòng if → mệnh đề; dòng gán → biến + vế phải.
-    /// Dòng gán cần vế phải vì breakpoint dừng TRƯỚC khi dòng chạy, lúc đó biến còn mang giá trị cũ.
-    /// Mọi chuỗi trả về là lát nguyên văn của dòng: SetWatch bôi đen đúng text đó trong file .cs.
-    /// </summary>
+    // Chuỗi trả về phải NGUYÊN VĂN như trong file: SetWatch điền Watch bằng FindText bôi đen đúng
+    // đoạn text đó trong .cs, lệch một ký tự là trượt và mất hẳn phần tự điền.
     public static List<string> WatchFor(string line, string varName)
     {
         var v = (varName ?? "").Trim();
@@ -420,7 +405,6 @@ public static class Mapping
         => _ws.Replace(haystack, " ").Contains(_ws.Replace(needle.Trim(), " "))
            || _ws.Replace(haystack, "").Contains(_ws.Replace(needle, ""));
 
-    /// <summary>Đánh dấu vị trí nằm trong chuỗi / ký tự, để tìm "=", "//", ";" không dính phần trong nháy.</summary>
     static bool[] LiteralMask(string text)
     {
         var mask = new bool[text.Length];
@@ -464,7 +448,6 @@ public static class Mapping
         return mask;
     }
 
-    /// <summary>Nội dung cặp ngoặc ngoài cùng ngay sau "if". Có goto cùng dòng vẫn đúng vì chỉ lấy phần trong ngoặc.</summary>
     static string? IfCondition(string text, bool[] mask)
     {
         var m = _ifHead.Match(text);
@@ -588,7 +571,6 @@ public static class IfClause
 
     public static bool IsIf(string? item) => _if.IsMatch((item ?? "").Trim());
 
-    /// <summary>Mệnh đề vòng lặp: chỉ điều hướng + chụp, không bao giờ sinh lệnh SET để bypass.</summary>
     public static bool IsLoop(string? item) => _loop.IsMatch((item ?? "").Trim());
 
     public static IfBypass? Suggest(string? item)
