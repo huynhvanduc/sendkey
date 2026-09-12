@@ -505,6 +505,10 @@ public class MainForm : Form
 
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => ShowConfigWindow();
+
+        // Dùng CHUNG một menu cho khay và thanh nổi: đang chụp thì cửa sổ đã thu về khay, mà icon khay
+        // hay bị Windows giấu — chuột phải vào thanh là đường thoát duy nhất còn nhìn thấy được.
+        _evidence?.Bar.AttachMenu(menu);
     }
 
     string? RegisterHotkeys()

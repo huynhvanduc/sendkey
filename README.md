@@ -21,7 +21,9 @@ dotnet publish src/SendKeyDemo/SendKeyDemo.csproj -c Release -r win-x64 --self-c
 
 - App chỉ chạy 1 bản. Mở lần nữa thì cửa sổ bản đang chạy nổi lên.
 - Bấm `X` là **thoát hẳn**. Muốn app chạy nền thì bấm **▶ Khởi động** — nút đó tự thu cửa sổ
-  về khay, hotkey vẫn chạy. Đang chạy nền mà muốn thoát: chuột phải icon ở khay → **Thoát**.
+  về khay, hotkey vẫn chạy.
+- Đang chạy nền mà muốn thoát: **chuột phải vào thanh nổi** → **Thoát**. (Chuột phải icon ở khay cũng ra
+  đúng menu đó, nhưng Windows hay giấu icon khay vào mục ẩn nên thanh nổi là đường chắc hơn.)
 - Cấu hình (hotkey, `SaveFolder`, `ClipboardWidthInches`/`ClipboardHeightInches` = cỡ ảnh khi dán vào Excel)
   nằm trong `settings.json` cạnh exe, lần đầu chạy tự tạo.
 
@@ -206,6 +208,9 @@ App không bao giờ tự gõ phím vào VS, để khỏi gõ nhầm vào file `
 | 16d | Vẫn đang dừng trong `Program.cs`, copy `RECALC` rồi `「%AMT%」` (2 dòng này pin `csharpFile=Steps.cs`), rồi copy lại `CHECK_INPUT` | `CHECK_INPUT` vẫn tra trong **`Program.cs`** — mốc là file có mũi tên vàng, không trôi sang `Steps.cs` sau khi vừa điều hướng qua đó |
 | 16e | Khi ĐANG DỪNG, bấm `Ctrl+Shift+D` | Breakpoint app đặt biến hết **và cửa sổ Watch sạch**; thanh ghi `đã xoá N điểm dừng · đã làm sạch Watch`, chấm về xám. Bấm lần nữa → `không có điểm dừng nào để xoá · …`. Breakpoint bạn TỰ đặt ở file khác **không** bị xóa |
 | 16f | Cho chương trình chạy tiếp (không còn dừng) rồi bấm `Ctrl+Shift+D` | Breakpoint vẫn sạch, nhưng Watch giữ nguyên và thanh nói rõ `Watch chỉ xoá được khi đang dừng` — VS không cho sửa Watch lúc không dừng. Chấm **không** đỏ |
+| 16g | Chuột phải vào thanh nổi — thử cả chỗ CÓ CHỮ (tên label, đường dẫn) lẫn chỗ trống | Ra menu giống menu khay, có **Thoát**. Trúng chữ cũng phải ra, không chỉ chỗ trống |
+| 16h | Chuột phải rồi Esc đóng menu | Thanh **không** bị xê dịch. Kéo thanh vẫn phải làm bằng chuột trái |
+| 16i | Chuột phải vào thanh → **Thoát** | Tiến trình `SendKeyDemo` không còn trong Task Manager |
 | 17 | Bấm `Ctrl+Shift+S` khi chưa chạy | Buzz, không có ảnh, báo `❌ Chưa dừng ở breakpoint…` |
 | 18 | Cho chương trình (đang debug sẵn) chạy tới dòng 34 | Watch 1 chỉ còn `rc` và `inputFile.EndsWith(".csv") ? 0 : 12` (dòng cũ bị xoá) — dòng gán nên có cả vế phải; ding; chấm xanh lá. App không tự chạy / khởi động lại debug |
 | 19 | Bấm `Ctrl+Shift+S` | Ding; cửa sổ lúc copy nổi lên; Ctrl+V ra ảnh; thanh `✓ đủ 1 ảnh` |

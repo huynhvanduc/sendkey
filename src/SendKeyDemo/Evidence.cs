@@ -882,6 +882,23 @@ public sealed class EvidenceBarForm : Form
     }
 
     // Kéo thanh ở bất kỳ chỗ nào (trừ ô nhập); double-click = mở cửa sổ cấu hình.
+    // ContextMenuStrip KHÔNG kế thừa xuống control con, mà thanh gần như phủ kín bởi Label — chuột phải
+    // trúng chữ sẽ không ra menu nếu chỉ gán cho form. Gán đệ quy, trừ TextBox (giữ menu copy/paste của nó).
+    public void AttachMenu(ContextMenuStrip menu)
+    {
+        ContextMenuStrip = menu;
+        Attach(Controls);
+
+        void Attach(Control.ControlCollection kids)
+        {
+            foreach (Control c in kids)
+            {
+                if (c is not TextBox) c.ContextMenuStrip = menu;
+                Attach(c.Controls);
+            }
+        }
+    }
+
     void DragOrOpenConfig(object? sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
