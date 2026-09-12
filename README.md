@@ -174,7 +174,7 @@ App không bao giờ tự gõ phím vào VS, để khỏi gõ nhầm vào file `
 |---|---|---|
 | 1 | Mở BigSample trong VS, chạy app | Dropdown có instance VS; bấm `X` là **thoát hẳn** — tiến trình `SendKeyDemo` không còn trong Task Manager |
 | 2 | Mở exe lần nữa | Cửa sổ bản đang chạy nổi lên, không có bản thứ 2 |
-| 3 | Bấm **Kiểm tra** | `Kiểm tra mapping.csv: OK — 17 dòng, không thấy vấn đề.` |
+| 3 | Bấm **Kiểm tra** | `Kiểm tra mapping.csv: OK — 28 dòng, không thấy vấn đề.` |
 | 4 | Bấm **▶ Khởi động** | Cửa sổ thu về khay (double-click icon khay mở lại được); thanh nổi hiện `Copy label…`; hộp thoại nhắc khoanh vùng |
 | 5 | `Ctrl+Shift+R`, kéo chọn vùng | Log `Đã nhớ vùng chụp …` |
 | 6 | Copy `CHECK_INPUT` | VS cuộn tới dòng 32, bôi đen `CHECK_INPUT:`; thanh `1 dòng · label · Program.cs:32`, chấm xanh lá. **Excel vẫn giữ focus**, VS không nhảy lên đè |

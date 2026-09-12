@@ -58,7 +58,7 @@ public class BigSampleTests
     public void Mapping_csv_loads_with_mixed_column_counts()
     {
         var rows = Mapping.Load(Path.Combine(Dir, "mapping.csv"));
-        Assert.Equal(17, rows.Count);
+        Assert.Equal(28, rows.Count);
         Assert.Equal("", rows.First(r => r.CmdLabel == "INIT").CsharpFile);
         Assert.Equal("Steps.cs", rows.First(r => r.CmdLabel == "RECALC").CsharpFile);
     }
