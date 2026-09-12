@@ -21,11 +21,13 @@ CÁCH COPY  (quy tắc duy nhất: trong 「 」 là biến, ngoài ngoặc là 
 CHẤM TRÊN THANH
   🟢 tìm thấy đúng 1 dòng   🟡 nhiều dòng, copy lại để duyệt   🔴 không thấy
 
-QUAN TRỌNG — mapping.csv hiện CHƯA có dòng nào cho các nhãn mới bên dưới.
-  - Copy LABEL vẫn chạy được: app tìm theo prefix ngay trong file .cs đang mở.
-  - Copy BIẾN sẽ ra 🔴 "chưa có trong mapping.csv — bấm Ctrl+Shift+G để gõ C#".
-    Lúc đó bấm Ctrl+Shift+G, gõ tên C# theo cột "gõ gì" của từng ca, Enter.
+QUAN TRỌNG — mapping.csv chỉ có 11 dòng đại diện cho phần mở rộng này.
+  - Ca nào ghi "đã có mapping" thì chạy thẳng, không phải gõ gì.
+  - Ca còn lại: copy LABEL vẫn chạy được (app tìm theo prefix trong file .cs đang mở),
+    nhưng copy BIẾN sẽ ra 🔴 "chưa có trong mapping.csv — bấm Ctrl+Shift+G để gõ C#".
+    Bấm Ctrl+Shift+G, gõ tên C# theo dòng "gõ:" của ca đó, Enter.
     Gõ một lần là app ghi vào mapping.csv, lần sau khỏi gõ.
+    Đây cũng chính là cách thử đường "thiếu mapping → gõ tay", nên đừng thêm sẵn hết.
 
 
 ================================================================================
@@ -106,7 +108,7 @@ TEXT_URL
 確認値
 「%URL%」にエンドポイントが設定されていること
 
-  gõ:  TEXT_URL / url
+  đã có mapping (TEXT_URL / url) — chạy thẳng, không phải gõ
   Kỳ vọng: Watch phải là  "http://example.com/orders"  ĐỦ CẢ ĐUÔI.
            Nếu bị cắt thành  "http:  là lỗi cắt ở dấu //
 
@@ -167,7 +169,7 @@ TRICK_RAW
 確認値
 「%RAW_JSON%」に JSON 文字列が入ること
 
-  gõ:  TRICK_RAW / rawJson
+  đã có mapping (TRICK_RAW / rawJson) — chạy thẳng, không phải gõ
   Ca KHÓ NHẤT: dòng này có cả """ lẫn " lẫn // lẫn ; lẫn =
   Kỳ vọng: Watch giữ nguyên cả chuỗi raw. Nếu bị cắt giữa chừng thì báo mình.
 
@@ -193,7 +195,7 @@ LOOP_FOR
 確認値
 ループ終了後、「%SUM%」が 6 であること
 
-  gõ:  LOOP_FOR / sum
+  đã có mapping (LOOP_FOR / sum) — chạy thẳng, không phải gõ
   Kỳ vọng: đặt breakpoint được, KHÔNG có ô giá trị bypass trên thanh.
            Log ghi "là vòng lặp — chỉ điều hướng + chụp, không sinh lệnh SET".
            Breakpoint trong thân for sẽ dừng NHIỀU LẦN, mỗi lần một giá trị.
@@ -237,7 +239,7 @@ IF_SAME_LINE
 確認値
 「if "%RETRY%" NEQ "0"」の分岐に入ること
 
-  gõ:  IF_SAME_LINE / retry != 0
+  đã có mapping (IF_SAME_LINE / retry != 0) — chạy thẳng, không phải gõ
   Kỳ vọng: 2 breakpoint — dòng if, và CỘT của goto trên CÙNG dòng. Thanh "1/2".
            Chụp ảnh 1 → app tự set giá trị gợi ý 1 → F5 → chụp ảnh 2.
   LƯU Ý: BigSample không có hàm SET. Muốn chạy trọn luồng này thì thoát app,
@@ -295,7 +297,7 @@ SHAPE_INLINE
 確認値
 「%STAGE%」が 1 であること
 
-  gõ:  SHAPE_INLINE / stage
+  đã có mapping (SHAPE_INLINE / stage) — chạy thẳng, không phải gõ
   Kỳ vọng: breakpoint đặt NGAY trên dòng nhãn (ExecLine == LabelLine) và VẪN BIND.
 
 --------------------------------------------------------------------------------
@@ -339,10 +341,10 @@ NAME_SET
 確認値
 「%RC%」が 0 であること
 
-  gõ:  NAME_SET / rc
-  GIỚI HẠN: tìm biến trong thân nhãn đang so theo kiểu "có chứa", nên "rc" sẽ
-  dính cả dòng của rc2 và rcTotal → ra nhiều dòng hơn mong đợi. Duyệt bằng cách
-  copy lại để tới đúng dòng cần.
+  đã có mapping (NAME_SET / rc) — chạy thẳng, không phải gõ
+  Kỳ vọng: "rc" KHÔNG được dính dòng  rc2 = 5;  — khớp theo BIÊN TỪ, không phải
+  "có chứa". Dính rc2 hoặc rcTotal là lỗi quay lại (đã sửa ở 2b3eb01).
+  Thử ngược: copy 「%RC2%」 (gõ  NAME_SET / rc2) phải ra ĐÚNG dòng  rc2 = 5;
 
 --------------------------------------------------------------------------------
 TC2-29  左辺が単純な変数名でない場合
@@ -351,10 +353,15 @@ MEMBER_ARRAY
 確認値
 「%SLOT0%」が 10 であること
 
-  gõ:  MEMBER_ARRAY / slots[0]
-  GIỚI HẠN: vế trái là  slots[0]  chứ không phải tên trần → app KHÔNG nhận là
-  dòng gán, Watch chỉ có  slots[0]  mà KHÔNG kèm vế phải. Đúng như đã biết.
-  Thử thêm:  MEMBER_DICT / map["rc"]     MEMBER_PROP / box.Rc
+  đã có mapping (MEMBER_ARRAY / slots[0]) — chạy thẳng, không phải gõ
+  GIỚI HẠN THẬT: vế trái  slots[0]  có ngoặc vuông nên KHÔNG được nhận là dòng
+  gán → Watch chỉ có  slots[0], KHÔNG kèm vế phải.
+  Giống vậy:  MEMBER_DICT / map["rc"]   (đã có mapping)
+
+  NHƯNG  MEMBER_PROP / box.Rc  thì NGƯỢC LẠI — CHẠY ĐƯỢC như dòng gán bình
+  thường, vì tên có dấu chấm vẫn được coi là định danh thuần. Watch phải có
+  CẢ HAI:  box.Rc  và  slots[1] > 0 ? 0 : 82
+  Tức giới hạn chỉ nằm ở ngoặc vuông, không phải ở mọi vế trái phức tạp.
 
 --------------------------------------------------------------------------------
 TC2-30  複合代入演算子とラムダ
@@ -363,7 +370,7 @@ OPER_COMPOUND
 確認値
 「%OP_ACC%」の累計値
 
-  gõ:  OPER_COMPOUND / opAcc
+  đã có mapping (OPER_COMPOUND / opAcc) — chạy thẳng, không phải gõ
   Kỳ vọng:  opAcc += 5;  KHÔNG được coi là dòng gán → Watch chỉ có  opAcc
   Thử thêm:  OPER_LAMBDA / pick   (dấu => không phải dấu gán)
 
@@ -374,7 +381,7 @@ WRAP_SUM
 確認値
 「%GRAND%」が合計値であること
 
-  gõ:  WRAP_SUM / grand
+  đã có mapping (WRAP_SUM / grand) — chạy thẳng, không phải gõ
   Kỳ vọng: dòng  grand =  không kết thúc bằng ";" nên vế phải là mảnh cụt →
            Watch CHỈ có  grand, không kèm vế phải. Đúng như thiết kế.
 
