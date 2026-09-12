@@ -304,6 +304,12 @@ public static class VsAutomation
         if (hwnd != IntPtr.Zero) SetForegroundWindow(hwnd);
     }
 
+    public static bool InBreakMode(DTE dte)
+    {
+        try { return dte.Debugger.CurrentMode == dbgDebugMode.dbgBreakMode; }
+        catch { return false; }
+    }
+
     public static List<string>? SetWatch(DTE dte, string file, int fromLine, IReadOnlyList<string> exprs)
     {
         if (dte.Debugger.CurrentMode != dbgDebugMode.dbgBreakMode) return null;

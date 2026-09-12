@@ -389,7 +389,12 @@ public sealed class EvidenceSession : IDisposable
                 _host.Log($"Chụp: ⚠ dòng {Path.GetFileName(s.File)}:{s.Line} không nhắc tới \"{w}\" — " +
                           "giá trị có thể chưa được gán ở đây.");
 
-        _bar.SetPair(_cmdLabel, _items, TargetText(stops, 0));
+        // Đang dừng sẵn thì điền Watch NGAY, dùng lại Recheck (nó tự SetWatch + ShowLabel + chấm điểm).
+        // Chưa dừng thì đừng gọi: Recheck sẽ đọc trạng thái debug rỗng rồi báo linh tinh.
+        if (VsAutomation.InBreakMode(dte) && Recheck(refresh: true) != null) return;
+
+        // Thanh chỉ hiện dòng lý do khi vàng/đỏ, nên phải nói đang chờ gì ngay ở dòng 1.
+        _bar.SetPair(_cmdLabel, _items, $"{TargetText(stops, 0)} · chờ F5, Watch tự điền khi dừng");
         _bar.SetStatus(StripState.Pending, null);
     }
 
