@@ -49,7 +49,6 @@ public class MainForm : Form
     EvidenceSession? _evidence;
     AppSettings _settings = new();
     Rectangle? _savedRegion;
-    bool _reallyExit;
 
     static FlowLayoutPanel ButtonCell(params Control[] buttons)
     {
@@ -515,7 +514,7 @@ public class MainForm : Form
             (_, _) => PlainCapture(ScreenCapture.CursorScreenBounds()));
         menu.Items.Add($"Chụp cửa sổ hiện tại ({_settings.ActiveWindowHotkey})", null, (_, _) => CaptureActiveWindow());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Thoát", null, (_, _) => { _reallyExit = true; Close(); });
+        menu.Items.Add("Thoát", null, (_, _) => Close());
 
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => ShowConfigWindow();
@@ -599,19 +598,10 @@ public class MainForm : Form
         ShowConfigWindow();
     }
 
-    // Bấm X = thu về tray (app còn sống để hotkey vẫn chạy). Thoát hẳn chỉ qua menu tray.
+    // Bấm X = THOÁT HẲN. Muốn chạy nền thì bấm nút "▶ Khởi động" — nút đó tự
+    // thu cửa sổ về tray (StartClipboardMode gọi Hide()) và giữ hotkey chạy tiếp.
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        if (!_reallyExit && e.CloseReason == CloseReason.UserClosing)
-        {
-            e.Cancel = true;
-            Hide();
-            _tray.BalloonTipTitle = "Vẫn đang chạy";
-            _tray.BalloonTipText = "App thu về khay hệ thống, hotkey vẫn hoạt động. Thoát hẳn: chuột phải icon → Thoát.";
-            _tray.ShowBalloonTip(2000);
-            return;
-        }
-
         base.OnFormClosing(e);
         _evidence?.Dispose();
         _hotkeys.Dispose();

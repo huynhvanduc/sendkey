@@ -20,7 +20,8 @@ dotnet publish src/SendKeyDemo/SendKeyDemo.csproj -c Release -r win-x64 --self-c
 ```
 
 - App chỉ chạy 1 bản. Mở lần nữa thì cửa sổ bản đang chạy nổi lên.
-- Bấm `X` là thu về tray. Muốn thoát hẳn: chuột phải icon → **Thoát**.
+- Bấm `X` là **thoát hẳn**. Muốn app chạy nền thì bấm **▶ Khởi động** — nút đó tự thu cửa sổ
+  về khay, hotkey vẫn chạy. Đang chạy nền mà muốn thoát: chuột phải icon ở khay → **Thoát**.
 - Cấu hình (hotkey, `SaveFolder`, `ClipboardWidthInches`/`ClipboardHeightInches` = cỡ ảnh khi dán vào Excel)
   nằm trong `settings.json` cạnh exe, lần đầu chạy tự tạo.
 
@@ -45,7 +46,7 @@ Nút **Kiểm tra** cạnh ô mapping.csv soát cặp bị trùng và label khô
 ## Chụp bằng chứng
 
 1. Trỏ **mapping.csv** + **target .cs**, chọn instance VS.
-2. Bấm **▶ Bắt đầu chụp bằng chứng**. Cửa sổ thu về tray, chỉ còn thanh nổi trên màn hình.
+2. Bấm **▶ Khởi động**. Cửa sổ thu về khay, trên màn hình chỉ còn thanh nổi.
 3. Sắp cửa sổ VS sao cho thấy tab tên file, dòng code và cửa sổ Watch, rồi bấm `Ctrl+Shift+R` khoanh vùng chụp.
    Chỉ làm 1 lần cho cả đợt. Nếu `settings.json` có `ClipboardWidthInches` / `ClipboardHeightInches` thì hiện
    **khung cỡ cố định** (inch × 96 px) chạy theo chuột: đưa tới chỗ rồi click để chốt, Esc để huỷ.

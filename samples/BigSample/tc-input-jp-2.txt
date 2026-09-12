@@ -9,7 +9,7 @@ CHUẨN BỊ
      là thoát. Muốn dừng giữa chừng thì đặt breakpoint rồi F5.
   2. Trong app:  mapping.csv = samples/BigSample/mapping.csv
                  target .cs  = samples/BigSample/Program.cs
-  3. Bấm  ▶ Bắt đầu chụp bằng chứng
+  3. Bấm nút  ▶ Khởi động
   4. Sắp VS thấy cả dòng code lẫn cửa sổ Watch  →  Ctrl+Shift+R khoanh vùng (1 lần).
 
 CÁCH COPY  (quy tắc duy nhất: trong 「 」 là biến, ngoài ngoặc là label)
