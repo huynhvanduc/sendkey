@@ -84,6 +84,9 @@ VS:     app xoá Watch cũ, thêm đúng biến của dòng đó, kiểm tra (di
   Chỉ `Ctrl+Shift+G` mới đặt breakpoint và đưa VS lên trước.
 - Tìm biến khớp theo **tên trọn vẹn**, nên `rc` không dính `rc2` / `rcTotal` / `_rc`. Mệnh đề (vd `rc != 0`)
   thì khớp theo văn bản, bỏ qua khác biệt khoảng trắng — `if(rc!=0)` vẫn tìm ra.
+- Phạm vi tìm là **class đang debug**: khi chương trình đang dừng, app lấy file có **mũi tên vàng** làm mốc,
+  không phải tab đang mở. Nhờ vậy điều hướng tới một dòng pin `csharpFile` của class khác không làm mốc
+  trôi theo. Chưa dừng thì mới dùng file đang mở.
 - App **không bao giờ tự chạy hay khởi động lại phiên debug**. Mở tool khi chương trình đang debug sẵn; breakpoint đặt
   bằng `Ctrl+Shift+G` sẽ dừng khi chương trình chạy tới.
 - **Mỗi điểm dừng chỉ Watch biến của đúng dòng đó.** 3 biến nằm ở 3 dòng = 3 ảnh, mỗi ảnh 1 biến: đi tới dòng nào thì
@@ -133,9 +136,11 @@ chỉ lấy cặp trông như biến batch (`%X%`, `!X!`, `if …`, `goto …`),
 | `Ctrl+Shift+S` | Trong đợt: chụp bằng chứng vào clipboard. Ngoài đợt: chụp vùng đã nhớ, lưu PNG |
 | `Ctrl+Shift+F` | Chụp toàn màn hình, lưu PNG |
 | `Ctrl+Shift+W` | Chụp cửa sổ đang active, lưu PNG |
+| `Ctrl+Shift+D` | Xóa breakpoint app đã đặt + quên nhóm đang chọn. Ngoài đợt: xóa breakpoint trong class đang debug |
 
 Phím của app là phím toàn cục: lúc app chạy, nó đè phím cùng tổ hợp của VS — `Ctrl+Shift+S` (Save All),
-`Ctrl+Shift+F` (Find in Files). Đổi phím trong `settings.json` nếu cần.
+`Ctrl+Shift+F` (Find in Files), `Ctrl+Shift+D` (phím mở đầu chord của menu Debug). Đổi phím trong
+`settings.json` nếu cần (`CaptureRegionHotkey`, `FullScreenHotkey`, `ClearBreakpointsHotkey`, …).
 
 Khi bấm `Ctrl+Shift+S`, app điền lại Watch (để VS tính lại giá trị) và kiểm tra trạng thái VS rồi mới chụp. Lúc chụp, app tạm ẩn thanh nổi và dời chuột
 ra ngoài vùng chụp (để ảnh không dính tooltip giá trị biến), chụp xong trả chuột về chỗ cũ.
@@ -198,6 +203,8 @@ App không bao giờ tự gõ phím vào VS, để khỏi gõ nhầm vào file `
 | 16 | Đưa về dòng 34, bấm `Ctrl+Shift+G` khi chương trình CHƯA dừng | Trong file chỉ còn 1 breakpoint, ở **dòng 34**; VS nổi lên, tab `Program.cs`, dòng `CHECK_INPUT:` ở đầu vùng nhìn; thanh ghi `chờ F5, Watch tự điền khi dừng` |
 | 16b | Khi đang dừng sẵn ở dòng 34, bấm `Ctrl+Shift+G` lần nữa | Watch điền **ngay** (không phải chờ F5), chấm chuyển màu theo kết quả chấm, và **không** kêu buzz |
 | 16c | Vẫn đang dừng ở dòng 34, copy `「%HDR_OK%」` để sang `VALIDATE_HEADER`, bấm `Ctrl+Shift+G` | Watch đổi sang `headerOk` **ngay**, dù mũi tên vàng vẫn ở dòng 34. Thanh ghi `Watch đã điền · chờ F5 tới dòng này`, chấm **không** đỏ |
+| 16d | Vẫn đang dừng trong `Program.cs`, copy `RECALC` rồi `「%AMT%」` (2 dòng này pin `csharpFile=Steps.cs`), rồi copy lại `CHECK_INPUT` | `CHECK_INPUT` vẫn tra trong **`Program.cs`** — mốc là file có mũi tên vàng, không trôi sang `Steps.cs` sau khi vừa điều hướng qua đó |
+| 16e | Bấm `Ctrl+Shift+D` | Breakpoint app đặt biến hết; thanh ghi `đã xoá N điểm dừng`, chấm về xám. Bấm lần nữa → `không có điểm dừng nào để xoá`. Breakpoint bạn TỰ đặt ở file khác **không** bị xóa |
 | 17 | Bấm `Ctrl+Shift+S` khi chưa chạy | Buzz, không có ảnh, báo `❌ Chưa dừng ở breakpoint…` |
 | 18 | Cho chương trình (đang debug sẵn) chạy tới dòng 34 | Watch 1 chỉ còn `rc` và `inputFile.EndsWith(".csv") ? 0 : 12` (dòng cũ bị xoá) — dòng gán nên có cả vế phải; ding; chấm xanh lá. App không tự chạy / khởi động lại debug |
 | 19 | Bấm `Ctrl+Shift+S` | Ding; cửa sổ lúc copy nổi lên; Ctrl+V ra ảnh; thanh `✓ đủ 1 ảnh` |

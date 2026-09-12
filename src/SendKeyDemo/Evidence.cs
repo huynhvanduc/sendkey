@@ -166,6 +166,27 @@ public sealed class EvidenceSession : IDisposable
         ShowNav(same);
     }
 
+    /// <summary>Phím xoá breakpoint: dọn đúng những file app đã đụng, rồi cho nhóm bắt đầu lại sạch.</summary>
+    public void ClearBreakpoints()
+    {
+        if (!_active) return;
+
+        int n = _stops.Count;
+        if (_bpFiles.Count > 0 && _host.CurrentDte() is { } dte)
+            try { foreach (var f in _bpFiles) VsAutomation.ClearBreakpointsInFile(dte, f); }
+            catch (Exception ex) { Block("Lỗi xoá breakpoint: " + ex.Message); return; }
+
+        _picked.Clear();
+        _items.Clear();
+        ResetStops();
+        _bpFiles.Clear();
+
+        var msg = n > 0 ? $"đã xoá {n} điểm dừng" : "không có điểm dừng nào để xoá";
+        _bar.SetPair(_cmdLabel, _items, msg);
+        _bar.SetStatus(StripState.Idle, null);
+        _host.Log("Chụp: " + msg + " — copy lại label/biến rồi bấm " + _settings.GotoCurrentHotkey + ".");
+    }
+
     /// <summary>Label khác = nhóm mới: quên chỗ đã chọn và xoá breakpoint của nhóm cũ.</summary>
     void StartGroup()
     {
@@ -178,14 +199,14 @@ public sealed class EvidenceSession : IDisposable
         _bpFiles.Clear();
     }
 
-    /// <summary>Mọi nhãn khớp label vừa copy. Không có dòng mapping thì tìm ngay trong file .cs đang mở ở VS.</summary>
+    /// <summary>Mọi nhãn khớp label vừa copy. Không có dòng mapping thì tìm trong class đang debug.</summary>
     List<NavHit> BuildLabelNav(string label)
     {
         var nav = new List<NavHit>();
         if (_host.CurrentDte() is not { } dte) { _navReason = "Chưa chọn instance VS — mở cửa sổ cấu hình bấm Refresh."; return nav; }
 
         var row = _host.GetMapRows()?.FirstOrDefault(r => Mapping.NormalizeLabel(r.CmdLabel) == Mapping.NormalizeLabel(label));
-        var csp = row != null ? _host.EffectiveCsPath(row) : VsAutomation.ActiveFile(dte);
+        var csp = row != null ? _host.EffectiveCsPath(row) : VsAutomation.CurrentClassFile(dte);
         var prefix = row != null ? row.CsharpLabel : Mapping.CleanLabel(label);
 
         if (string.IsNullOrWhiteSpace(csp) || !File.Exists(csp))

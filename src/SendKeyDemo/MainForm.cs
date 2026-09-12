@@ -239,7 +239,7 @@ public class MainForm : Form
         if (cmdL.Length == 0) return "cmdLabel đang trống.";
         if (csL.Length == 0 || (cmdV.Length > 0 && csV.Length == 0)) return "csharpLabel / csharpVar không được để trống.";   // ca goto: chỉ cần label
 
-        var csPath = CurrentDte() is { } dte ? VsAutomation.ActiveFile(dte) ?? "" : "";
+        var csPath = CurrentDte() is { } dte ? VsAutomation.CurrentClassFile(dte) ?? "" : "";
         if (csPath.Length == 0 || !File.Exists(csPath))
             return "Chưa mở file .cs nào trong VS — mở file chứa nhãn rồi thử lại.";
 
@@ -386,7 +386,7 @@ public class MainForm : Form
     internal string EffectiveCsPath(MapRow row)
     {
         var f = row.CsharpFile.Trim();
-        if (f.Length == 0) return CurrentDte() is { } dte ? VsAutomation.ActiveFile(dte) ?? "" : "";
+        if (f.Length == 0) return CurrentDte() is { } dte ? VsAutomation.CurrentClassFile(dte) ?? "" : "";
         if (Path.IsPathRooted(f)) return f;
         var baseDir = Path.GetDirectoryName(_mappingPath.Text.Trim()) ?? "";
         try { return Path.GetFullPath(Path.Combine(baseDir, f)); }
@@ -457,7 +457,8 @@ public class MainForm : Form
     void RefreshHotkeyHint()
         => _hotkeyHint.Text =
             $"Trong đợt:   {_settings.DefineRegionHotkey} khoanh vùng (1 lần)   ·   " +
-            $"{_settings.GotoCurrentHotkey} đặt breakpoint   ·   {_settings.CaptureRegionHotkey} chụp";
+            $"{_settings.GotoCurrentHotkey} đặt breakpoint   ·   {_settings.CaptureRegionHotkey} chụp   ·   " +
+            $"{_settings.ClearBreakpointsHotkey} xóa breakpoint";
 
     /// <summary>Nút chính — vào thẳng chế độ copy từ Excel, không qua hộp thoại nào.</summary>
     void StartClipboardMode()
@@ -519,10 +520,23 @@ public class MainForm : Form
         RegisterOne(_settings.FullScreenHotkey, defaults.FullScreenHotkey, "Chụp toàn màn hình",
             () => PlainCapture(ScreenCapture.CursorScreenBounds()), failed);
         RegisterOne(_settings.ActiveWindowHotkey, defaults.ActiveWindowHotkey, "Chụp cửa sổ", CaptureActiveWindow, failed);
+        RegisterOne(_settings.ClearBreakpointsHotkey, defaults.ClearBreakpointsHotkey, "Xóa breakpoint",
+            ClearBreakpointsHotkey, failed);
         RegisterOne(_settings.GotoCurrentHotkey, defaults.GotoCurrentHotkey, "Chạy cặp đang chọn",
             () => _evidence?.Run(), failed);
 
         return failed.Count > 0 ? "không đăng ký được: " + string.Join("; ", failed) : null;
+    }
+
+    /// <summary>Phím xoá breakpoint: trong đợt thì dọn theo nhóm, ngoài đợt thì dọn file đang debug.</summary>
+    void ClearBreakpointsHotkey()
+    {
+        if (_evidence is { Active: true } session) { session.ClearBreakpoints(); return; }
+
+        if (CurrentDte() is not { } dte) { Log("Xóa breakpoint: chưa chọn instance VS."); return; }
+        var f = VsAutomation.CurrentClassFile(dte);
+        if (string.IsNullOrWhiteSpace(f)) { Log("Xóa breakpoint: chưa mở file .cs nào trong VS."); return; }
+        Log("Xóa breakpoint: " + VsAutomation.ClearBreakpointsInFile(dte, f));
     }
 
     void RegisterOne(string spec, string fallback, string label, Action action, List<string> failed)

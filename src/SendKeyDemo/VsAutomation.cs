@@ -304,6 +304,22 @@ public static class VsAutomation
         if (hwnd != IntPtr.Zero) SetForegroundWindow(hwnd);
     }
 
+    /// <summary>
+    /// "Class hiện tại đang debug": đang dừng thì lấy file có mũi tên vàng, không thì file đang mở.
+    /// KHÔNG được dùng ActiveFile làm mốc lúc đang dừng — GoToLine tự đổi tab active, nên mốc sẽ trôi
+    /// sang class khác ngay sau khi điều hướng tới một dòng pin csharpFile của file đó.
+    /// </summary>
+    public static string? CurrentClassFile(DTE dte)
+    {
+        try
+        {
+            if (InBreakMode(dte) && ReadDebugState(dte, "", Array.Empty<string>()).HitFile is { Length: > 0 } hit)
+                return hit;
+        }
+        catch { /* rơi về file đang mở */ }
+        return ActiveFile(dte);
+    }
+
     public static bool InBreakMode(DTE dte)
     {
         try { return dte.Debugger.CurrentMode == dbgDebugMode.dbgBreakMode; }

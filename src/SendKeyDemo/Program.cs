@@ -55,6 +55,7 @@ public sealed class AppSettings
     public string CaptureRegionHotkey { get; set; } = "Ctrl+Shift+S";
     public string FullScreenHotkey { get; set; } = "Ctrl+Shift+F";
     public string ActiveWindowHotkey { get; set; } = "Ctrl+Shift+W";
+    public string ClearBreakpointsHotkey { get; set; } = "Ctrl+Shift+D";
     public string SaveFolder { get; set; } = @"C:\Temp\shot";
 
     public double ClipboardWidthInches { get; set; } = 0;
