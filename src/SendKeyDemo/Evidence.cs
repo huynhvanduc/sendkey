@@ -389,9 +389,35 @@ public sealed class EvidenceSession : IDisposable
                 _host.Log($"Chụp: ⚠ dòng {Path.GetFileName(s.File)}:{s.Line} không nhắc tới \"{w}\" — " +
                           "giá trị có thể chưa được gán ở đây.");
 
-        // Đang dừng sẵn thì điền Watch NGAY, dùng lại Recheck (nó tự SetWatch + ShowLabel + chấm điểm).
-        // Chưa dừng thì đừng gọi: Recheck sẽ đọc trạng thái debug rỗng rồi báo linh tinh.
-        if (VsAutomation.InBreakMode(dte) && Recheck(refresh: true) != null) return;
+        // Điền Watch NGAY khi VS đang dừng, KHÔNG đòi mũi tên vàng phải ở đúng dòng này: code batch migrate
+        // là một Main lớn nên biến vẫn trong scope, VS đánh giá Watch theo scope hiện tại chứ không theo
+        // dòng mình nhắm. Chưa dừng thì VS không cho ghi Watch, đành chờ.
+        if (VsAutomation.InBreakMode(dte))
+        {
+            var pick = stops.FirstOrDefault(x => x.Line == h.Line && x.Column == 0 &&
+                                                 string.Equals(x.File, h.File, StringComparison.OrdinalIgnoreCase))
+                       ?? stops[0];
+            try
+            {
+                var missed = VsAutomation.SetWatch(dte, pick.File, pick.LabelLine, pick.Watch);
+                if (missed is not { Count: 0 })
+                {
+                    var manual = missed ?? pick.Watch.ToList();
+                    CopyForManualWatch(manual);
+                    if (manual.Count > 0) _host.Log($"Chụp: đã copy {string.Join(", ", manual)} — Ctrl+V vào Watch.");
+                }
+            }
+            catch (Exception ex) { _host.Log("Chụp: lỗi điền Watch — " + ex.Message); }
+
+            // Chỉ để Recheck chấm khi đang dừng ĐÚNG dòng đó. Dừng chỗ khác thì CaptureCheck.Evaluate trả
+            // Block "không phải dòng của …" — đó là trạng thái bình thường lúc chưa chạy tới, không phải lỗi,
+            // nên đừng để nó thành chấm đỏ chặn đường.
+            if (IsAt(pick, VsAutomation.ReadDebugState(dte, "", Array.Empty<string>()))) { Recheck(); return; }
+
+            _bar.SetPair(_cmdLabel, _items, $"{TargetText(stops, 0)} · Watch đã điền · chờ F5 tới dòng này");
+            _bar.SetStatus(StripState.Pending, null);
+            return;
+        }
 
         // Thanh chỉ hiện dòng lý do khi vàng/đỏ, nên phải nói đang chờ gì ngay ở dòng 1.
         _bar.SetPair(_cmdLabel, _items, $"{TargetText(stops, 0)} · chờ F5, Watch tự điền khi dừng");

@@ -73,8 +73,8 @@ Excel:  Ctrl+C label (không có ngoặc)
           │                            mở đúng tab, cuộn cho dòng label nằm đầu vùng nhìn, đưa VS lên trước
           └─ chưa có → thanh nổi mở ô gõ csharpLabel / csharpVar, Enter
                        (app kiểm tra với code trước, ghi thêm dòng rồi đặt breakpoint luôn)
-          (đang dừng sẵn ở đúng dòng đó thì Watch điền NGAY lúc bấm G;
-           chưa dừng thì thanh ghi "chờ F5, Watch tự điền khi dừng")
+          (VS đang dừng ở BẤT KỲ đâu thì Watch điền NGAY lúc bấm G — không cần mũi tên
+           vàng ở đúng dòng này; chưa dừng thì thanh ghi "chờ F5, Watch tự điền khi dừng")
         F5 (bạn tự bấm trong VS) → chương trình chạy tới breakpoint thì dừng
 VS:     app xoá Watch cũ, thêm đúng biến của dòng đó, kiểm tra (ding = được, buzz = lỗi)
         Ctrl+Shift+S → ảnh vào clipboard → cửa sổ Excel tự nổi lại → Ctrl+V
@@ -197,6 +197,7 @@ App không bao giờ tự gõ phím vào VS, để khỏi gõ nhầm vào file `
 | 15 | Bấm `Ctrl+Shift+S` khi chưa `Ctrl+Shift+G` | Buzz, không có ảnh |
 | 16 | Đưa về dòng 34, bấm `Ctrl+Shift+G` khi chương trình CHƯA dừng | Trong file chỉ còn 1 breakpoint, ở **dòng 34**; VS nổi lên, tab `Program.cs`, dòng `CHECK_INPUT:` ở đầu vùng nhìn; thanh ghi `chờ F5, Watch tự điền khi dừng` |
 | 16b | Khi đang dừng sẵn ở dòng 34, bấm `Ctrl+Shift+G` lần nữa | Watch điền **ngay** (không phải chờ F5), chấm chuyển màu theo kết quả chấm, và **không** kêu buzz |
+| 16c | Vẫn đang dừng ở dòng 34, copy `「%HDR_OK%」` để sang `VALIDATE_HEADER`, bấm `Ctrl+Shift+G` | Watch đổi sang `headerOk` **ngay**, dù mũi tên vàng vẫn ở dòng 34. Thanh ghi `Watch đã điền · chờ F5 tới dòng này`, chấm **không** đỏ |
 | 17 | Bấm `Ctrl+Shift+S` khi chưa chạy | Buzz, không có ảnh, báo `❌ Chưa dừng ở breakpoint…` |
 | 18 | Cho chương trình (đang debug sẵn) chạy tới dòng 34 | Watch 1 chỉ còn `rc` và `inputFile.EndsWith(".csv") ? 0 : 12` (dòng cũ bị xoá) — dòng gán nên có cả vế phải; ding; chấm xanh lá. App không tự chạy / khởi động lại debug |
 | 19 | Bấm `Ctrl+Shift+S` | Ding; cửa sổ lúc copy nổi lên; Ctrl+V ra ảnh; thanh `✓ đủ 1 ảnh` |
