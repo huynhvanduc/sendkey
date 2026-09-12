@@ -517,8 +517,7 @@ public sealed class CaptureFlyoutForm : Form
                     g.InterpolationMode = InterpolationMode.HighQualityBilinear;
                     DrawClippedContent(g, _smallSource, bounds);
 
-                    // Cross-fade: viền highlight mờ dần trong 100ms đầu, viền glow của thumbnail hiện dần thay thế
-                    // — thay cho cú cắt cứng Invalidate() ở bản trước.
+                    // Cross-fade 100ms: viền highlight mờ dần, viền glow của thumbnail hiện dần thay thế.
                     double crossT = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / 100.0);
                     if (crossT < 1.0)
                         DrawHighlightBorder(g, new Rectangle(0, 0, bounds.Width, bounds.Height), (float)(1 - crossT));
@@ -645,8 +644,7 @@ public sealed class CaptureFlyoutForm : Form
         _hoverSource = null;
     }
 
-    // Ẩn khỏi Alt+Tab, không cướp focus của cửa sổ đang dùng, và bật layered window
-    // để UpdateLayeredWindow điều khiển alpha per-pixel.
+    // Ẩn khỏi Alt+Tab, không cướp focus, và bật layered window cho alpha per-pixel.
     protected override CreateParams CreateParams
     {
         get
@@ -725,8 +723,7 @@ internal static class LayeredSurface
         }
     }
 
-    // GDI layered window cần alpha premultiplied (RGB đã nhân sẵn với A/255),
-    // trong khi Format32bppArgb của GDI+ là non-premultiplied — phải tự nhân tay.
+    // GDI layered window cần alpha premultiplied, còn Format32bppArgb thì không — phải tự nhân.
     private static void CopyPremultiplied(BitmapData src, IntPtr destBits, int w, int h)
     {
         int srcStride = src.Stride;

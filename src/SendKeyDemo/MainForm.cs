@@ -195,8 +195,7 @@ public class MainForm : Form
 
         Load += (_, _) =>
         {
-            // Form được tạo ở DPI hệ thống (màn chính 125%) rồi mới hiện lên màn đang dùng; sang màn
-            // 100% thì WinForms nhân mọi thứ ×0.8. Nên không đặt px cứng — quy từ đơn vị 96-dpi.
+            // Form tạo ở DPI màn chính rồi hiện ở màn khác, nên đừng đặt px cứng — quy từ đơn vị 96-dpi.
             MinimumSize = LogicalToDeviceUnits(new Size(680, 470));
             Size = LogicalToDeviceUnits(new Size(780, 580));
             CenterToScreen();
@@ -506,8 +505,7 @@ public class MainForm : Form
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => ShowConfigWindow();
 
-        // Dùng CHUNG một menu cho khay và thanh nổi: đang chụp thì cửa sổ đã thu về khay, mà icon khay
-        // hay bị Windows giấu — chuột phải vào thanh là đường thoát duy nhất còn nhìn thấy được.
+        // Dùng chung menu với khay: đang chụp chỉ còn thanh nổi, mà icon khay hay bị Windows giấu.
         _evidence?.Bar.AttachMenu(menu);
     }
 
@@ -600,8 +598,7 @@ public class MainForm : Form
         ShowConfigWindow();
     }
 
-    // Bấm X = THOÁT HẲN. Muốn chạy nền thì bấm nút "▶ Khởi động" — nút đó tự
-    // thu cửa sổ về tray (StartClipboardMode gọi Hide()) và giữ hotkey chạy tiếp.
+    // Bấm X là thoát hẳn; muốn chạy nền thì bấm "▶ Khởi động", nút đó tự Hide() và giữ hotkey.
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         base.OnFormClosing(e);

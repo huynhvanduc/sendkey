@@ -2,10 +2,7 @@ using Xunit.Abstractions;
 
 namespace SendKeyDemo.Tests;
 
-// Test trên bộ mẫu samples/BigSample, chạy đúng logic app dùng (bỏ phần cần VS đang chạy):
-// - mapping.csv (4 & 5 cột trộn) tra được mọi label trong Program.cs / Steps.cs — như nút "Kiểm tra".
-// - tc-input-jp.txt: mỗi khối lấy dòng dưới "ラベル" làm label, dòng dưới "確認値" làm biến, cho qua
-//   CopiedText.Classify rồi tra mapping.csv — giống hệt lúc app nghe clipboard.
+// Test trên bộ mẫu samples/BigSample, chạy đúng logic app dùng, bỏ phần cần VS đang chạy.
 public class BigSampleTests
 {
     readonly ITestOutputHelper _out;
@@ -22,8 +19,7 @@ public class BigSampleTests
         }
     }
 
-    // Luồng điều hướng thật: 「%RC%」 trong CHECK_INPUT rơi vào 3 dòng, mỗi dòng một hình dạng khác nhau
-    // nên Watch của từng dòng cũng phải khác nhau.
+    // 「%RC%」 trong CHECK_INPUT rơi vào 3 dòng, Watch của từng dòng phải khác nhau.
     [Fact]
     public void Rc_in_CHECK_INPUT_lands_on_three_lines_each_with_its_own_watch()
     {
@@ -171,8 +167,7 @@ public class BigSampleTests
         Assert.NotEqual(plainRcLine, clauseLine);
     }
 
-    // Phần E của file hướng dẫn gõ tay csharpLabel/csharpVar — kiểm để hướng dẫn không lạc hậu
-    // khi Program.cs đổi.
+    // Kiểm phần hướng dẫn gõ tay trong file test case không lạc hậu khi Program.cs đổi.
     [Theory]
     [InlineData("RECALC_VIA_HELPER", "total")]
     [InlineData("ROLLBACK_VIA_HELPER", "rc")]

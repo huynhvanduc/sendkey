@@ -170,8 +170,7 @@ public static class VsAutomation
             var dbg = dte.Debugger;
             bool inBreak = dbg.CurrentMode == dbgDebugMode.dbgBreakMode;
 
-            // Breakpoint nào vừa làm chương trình dừng — chính xác hơn nhiều so với đọc vị trí con trỏ,
-            // vì con trỏ có thể đã bị người dùng click đi chỗ khác.
+            // Đọc breakpoint vừa dừng, chính xác hơn vị trí con trỏ vì con trỏ có thể đã bị click đi.
             string hitFile = "";
             int hitLine = 0, hitColumn = 0;
             if (inBreak)
@@ -267,7 +266,7 @@ public static class VsAutomation
         }
         catch (COMException)
         {
-            // Chưa từng mở cửa sổ Watch nào -> Windows.Item ném. Gọi lệnh menu để VS tự tạo Watch 1.
+            // Gọi lệnh menu để VS tự tạo Watch 1, vì chưa từng mở thì Windows.Item ném.
             try { dte.ExecuteCommand("Debug.Watch1"); }
             catch (COMException) { /* vẫn không mở được — người dùng tự mở */ }
         }
@@ -303,8 +302,7 @@ public static class VsAutomation
         if (hwnd != IntPtr.Zero) SetForegroundWindow(hwnd);
     }
 
-    // ĐỪNG dùng ActiveFile làm mốc khi đang dừng: GoToLine gọi win.Activate() nên chính app đổi tab
-    // active → điều hướng tới một dòng pin csharpFile của class khác là mốc trôi sang đó, không tự về.
+    // ĐỪNG lấy ActiveFile làm mốc khi đang dừng: GoToLine gọi win.Activate() nên mốc trôi sang class khác.
     public static string? CurrentClassFile(DTE dte)
     {
         try

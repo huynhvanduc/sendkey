@@ -181,8 +181,7 @@ public static class Mapping
         var aOne = _ws.Replace(expr.Trim(), " ");
         var aNo = _ws.Replace(expr, "");
 
-        // Định danh thuần so theo BIÊN TỪ, y như SetWatch dùng MatchWholeWord — kẻo "rc" dính "rc2" / "rcTotal".
-        // Biểu thức vẫn so kiểu "có chứa", bỏ qua khác biệt khoảng trắng.
+        // Định danh thuần so theo BIÊN TỪ như SetWatch kẻo "rc" dính "rc2"; biểu thức vẫn so "có chứa".
         var word = IsExpression(expr) ? null : new Regex($@"\b{Regex.Escape(expr.Trim())}\b");
 
         bool inBlock = false;
@@ -240,9 +239,7 @@ public static class Mapping
         {
             var lines = linesFor(r);
 
-            // Dòng KHÔNG pin csharpFile: nhãn trùng tên giữa các class là chuyện thường trong code batch
-            // migrate (chương trình nào cũng có INIT: / CLEANUP: / END_PROC:), nên thấy nhãn trong file
-            // đang mở KHÔNG chứng minh là đúng dòng mapping. Mọi kết quả khác Ok chỉ là CHƯA KIỂM ĐƯỢC.
+            // Nhãn trùng tên giữa các class là chuyện thường, nên không khớp ở file đang mở chỉ là CHƯA KIỂM ĐƯỢC.
             if (r.CsharpFile.Trim().Length == 0)
             {
                 if (lines != null && FindLabelLineInText(lines, r.CsharpLabel, r.CsharpVar).Kind == LabelLineKind.Ok) ok++;
@@ -365,8 +362,7 @@ public static class Mapping
         return null;
     }
 
-    // Chuỗi trả về phải NGUYÊN VĂN như trong file: SetWatch điền Watch bằng FindText bôi đen đúng
-    // đoạn text đó trong .cs, lệch một ký tự là trượt và mất hẳn phần tự điền.
+    // Phải trả NGUYÊN VĂN vì SetWatch bôi đen đúng đoạn text đó trong .cs bằng FindText.
     public static List<string> WatchFor(string line, string varName)
     {
         var v = (varName ?? "").Trim();
@@ -465,7 +461,7 @@ public static class Mapping
         return null;
     }
 
-    // Vị trí dấu "=" của phép gán. Bỏ qua so sánh, lambda và mọi dạng gán kép. -1 nếu dòng không phải phép gán.
+    // Vị trí dấu "=" của phép gán, bỏ qua so sánh / lambda / gán kép; -1 nếu không phải phép gán.
     static int AssignIndex(string text, bool[] mask)
     {
         for (int i = 0; i < text.Length; i++)

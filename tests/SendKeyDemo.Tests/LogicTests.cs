@@ -566,8 +566,7 @@ public class MappingTests
     }
 
     [Theory]
-    // Không pin csharpFile thì mọi kết quả khác Ok chỉ là CHƯA KIỂM ĐƯỢC: nhãn cùng tên nằm ở class
-    // khác là chuyện thường trong code batch migrate, nên không chứng minh được dòng mapping sai.
+    // Không pin csharpFile thì mọi kết quả khác Ok chỉ là CHƯA KIỂM ĐƯỢC.
     [InlineData("NOSUCH", "x")]                  // NotFound
     [InlineData("L", "zz == 9")]                 // AnchorNotFound
     public void Validate_unpinned_row_that_does_not_match_is_unchecked_not_an_error(string csLabel, string csVar)

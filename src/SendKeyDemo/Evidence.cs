@@ -136,7 +136,7 @@ public sealed class EvidenceSession : IDisposable
         if (pieces.Count == 0) return;
         _sourceWindow = GetForegroundWindow();
 
-        // Copy CHỈ điều hướng. Breakpoint chỉ đụng tới khi bấm G, hoặc khi sang nhóm mới (xem StartGroup).
+        // Copy CHỈ điều hướng; breakpoint chỉ đụng tới khi bấm G hoặc khi sang nhóm mới.
         var key = CopiedText.Normalize(CopiedText.UnquoteExcel(raw));
         var now = DateTime.UtcNow;
         if (key == _navKey && now - _lastCopy < TimeSpan.FromMilliseconds(400)) return;   // lỡ tay Ctrl+C 2 phát
@@ -174,9 +174,7 @@ public sealed class EvidenceSession : IDisposable
             try { foreach (var f in _bpFiles) VsAutomation.ClearBreakpointsInFile(dte, f); }
             catch (Exception ex) { Block("Lỗi xoá breakpoint: " + ex.Message); return; }
 
-            // Bỏ nhóm thì Watch cũng phải sạch. Nhưng Watch chỉ thao tác được khi VS đang dừng, nên không
-            // xoá được thì phải NÓI THẬT kẻo user tưởng đã sạch — dù đó là giới hạn của VS, không phải lỗi
-            // thao tác, nên vẫn để Idle chứ không báo đỏ.
+            // Watch chỉ xoá được khi VS đang dừng, nên phải nói thật thay vì im lặng bỏ qua.
             watchNote = !VsAutomation.InBreakMode(dte) ? " · Watch chỉ xoá được khi đang dừng"
                 : VsAutomation.ClearWatchAll(dte) ? " · đã làm sạch Watch"
                 : " · không xoá được Watch, xoá tay giúp";
@@ -354,8 +352,7 @@ public sealed class EvidenceSession : IDisposable
         var h = _nav[_navIndex];
         if (h.Line == 0) { Block($"Sau nhãn ở dòng {h.LabelLine} không còn dòng thực thi."); return; }
 
-        // Watch đổi theo hình dạng dòng: dòng gán thì thêm cả vế phải, vì breakpoint dừng TRƯỚC khi dòng
-        // chạy nên biến còn mang giá trị cũ. Cùng File+Line nên GroupStops gom lại thành 1 điểm dừng.
+        // Dòng gán cần thêm vế phải vì breakpoint dừng TRƯỚC khi dòng chạy, lúc đó biến còn giá trị cũ.
         var src = File.ReadAllLines(h.File);
         var watches = Mapping.WatchFor(h.Line >= 1 && h.Line <= src.Length ? src[h.Line - 1] : "", h.Watch);
         if (watches.Count == 0) watches = new List<string> { "" };   // điều hướng theo label: không Watch gì
@@ -410,9 +407,7 @@ public sealed class EvidenceSession : IDisposable
                 _host.Log($"Chụp: ⚠ dòng {Path.GetFileName(s.File)}:{s.Line} không nhắc tới \"{w}\" — " +
                           "giá trị có thể chưa được gán ở đây.");
 
-        // Điền Watch NGAY khi VS đang dừng, KHÔNG đòi mũi tên vàng phải ở đúng dòng này: code batch migrate
-        // là một Main lớn nên biến vẫn trong scope, VS đánh giá Watch theo scope hiện tại chứ không theo
-        // dòng mình nhắm. Chưa dừng thì VS không cho ghi Watch, đành chờ.
+        // Điền Watch ngay, không đòi mũi tên vàng ở đúng dòng: biến local của Main vẫn trong scope.
         if (VsAutomation.InBreakMode(dte))
         {
             var pick = stops.FirstOrDefault(x => x.Line == h.Line && x.Column == 0 &&
@@ -430,9 +425,7 @@ public sealed class EvidenceSession : IDisposable
             }
             catch (Exception ex) { _host.Log("Chụp: lỗi điền Watch — " + ex.Message); }
 
-            // Chỉ để Recheck chấm khi đang dừng ĐÚNG dòng đó. Dừng chỗ khác thì CaptureCheck.Evaluate trả
-            // Block "không phải dòng của …" — đó là trạng thái bình thường lúc chưa chạy tới, không phải lỗi,
-            // nên đừng để nó thành chấm đỏ chặn đường.
+            // Dừng khác dòng thì Evaluate trả Block, là bình thường lúc chưa chạy tới — đừng báo đỏ.
             if (IsAt(pick, VsAutomation.ReadDebugState(dte, "", Array.Empty<string>()))) { Recheck(); return; }
 
             _bar.SetPair(_cmdLabel, _items, $"{TargetText(stops, 0)} · Watch đã điền · chờ F5 tới dòng này");
@@ -881,9 +874,7 @@ public sealed class EvidenceBarForm : Form
         InputSubmitted?.Invoke(_csLabel.Text.Trim(), _labelOnly ? "" : _csVar.Text.Trim());
     }
 
-    // Kéo thanh ở bất kỳ chỗ nào (trừ ô nhập); double-click = mở cửa sổ cấu hình.
-    // ContextMenuStrip KHÔNG kế thừa xuống control con, mà thanh gần như phủ kín bởi Label — chuột phải
-    // trúng chữ sẽ không ra menu nếu chỉ gán cho form. Gán đệ quy, trừ TextBox (giữ menu copy/paste của nó).
+    // ContextMenuStrip không kế thừa xuống control con, mà thanh phủ kín bởi Label nên phải gán đệ quy.
     public void AttachMenu(ContextMenuStrip menu)
     {
         ContextMenuStrip = menu;
@@ -899,6 +890,7 @@ public sealed class EvidenceBarForm : Form
         }
     }
 
+    // Kéo thanh ở bất kỳ chỗ nào (trừ ô nhập); double-click = mở cửa sổ cấu hình.
     void DragOrOpenConfig(object? sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
