@@ -73,14 +73,14 @@ public class MainForm : Form
         Text = "SendKey Evidence";
         AutoScaleMode = AutoScaleMode.Dpi;
 
-        // ---------- 1. Khối chuẩn bị: 3 thứ duy nhất cần trước khi chụp ----------
+        // ---------- 1. Khối chuẩn bị: 2 thứ duy nhất cần trước khi chụp ----------
         _instances.Dock = DockStyle.Fill;
 
         var setup = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             ColumnCount = 3,
-            RowCount = 3,
+            RowCount = 2,
             AutoSize = true,
             Padding = new Padding(12, 12, 12, 4),
         };
