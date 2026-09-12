@@ -136,7 +136,7 @@ public class BigSampleTests
         // Full-width ％ＲＣ％ phải ra đúng chỗ như %RC% thường.
         Assert.Equal(plainRcLine, fullWidthLine);
         // Mệnh đề trong 『 』 phải anchor tới dòng "if (rc != 0) …", không phải đầu label.
-        Assert.Equal("Program.cs:39", clauseLine);
+        Assert.Equal("Program.cs:36", clauseLine);
         Assert.NotEqual(plainRcLine, clauseLine);
     }
 

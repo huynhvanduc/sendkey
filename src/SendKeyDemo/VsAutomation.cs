@@ -54,18 +54,26 @@ public static class VsAutomation
         return list;
     }
 
-    public static string GoToLine(DTE dte, string file, int line)
+    /// <summary>select = bôi đen cả dòng; activate = false thì chỉ đổi tab trong VS, không raise VS đè lên Excel.</summary>
+    public static string GoToLine(DTE dte, string file, int line, bool select = false, bool activate = true)
     {
         if (!File.Exists(file)) return $"file không tồn tại: {file}";
         var win = dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView);
         win.Activate();
         var sel = (TextSelection)win.Document.Selection;
-        sel.GotoLine(line, false);
+        sel.GotoLine(line, select);
         var reached = sel.CurrentLine;
-        dte.MainWindow.Activate();
+        if (activate) dte.MainWindow.Activate();
         return reached == line
             ? $"đã tới {Path.GetFileName(file)}:{line}"
             : $"đã tới {Path.GetFileName(file)}:{reached} (file chỉ có {reached} dòng)";
+    }
+
+    /// <summary>File .cs đang mở trong VS. Đi thẳng ActiveDocument: ActiveWindow trả null khi cửa sổ Watch đang active.</summary>
+    public static string? ActiveFile(DTE dte)
+    {
+        try { return dte.ActiveDocument?.FullName; }
+        catch { return null; }
     }
 
     public static bool ShowLabel(DTE dte, string file, int labelLine, int stopLine)

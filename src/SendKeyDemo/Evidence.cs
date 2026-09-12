@@ -18,6 +18,16 @@ public sealed class EvidenceSession : IDisposable
     readonly List<string> _items = new();
     string? _askingItem;
 
+    /// <summary>Một chỗ có thể dừng, dựng lại sau mỗi lần copy. Line = dòng đặt breakpoint, LabelLine = dòng nhãn để cuộn.</summary>
+    record NavHit(string Item, string Watch, string File, int LabelLine, int Line);
+
+    string _navKey = "";
+    string _navReason = "";
+    List<NavHit> _nav = new();
+    int _navIndex;
+    DateTime _lastCopy;
+    readonly List<StopTarget> _picked = new();
+
     List<StopPoint> _stops = new();
     readonly HashSet<int> _done = new();
     int _currentStop = -1;
@@ -57,6 +67,10 @@ public sealed class EvidenceSession : IDisposable
         _clip.TextCopied += OnCopied;
         _cmdLabel = "";
         _items.Clear();
+        _picked.Clear();
+        _nav = new();
+        _navKey = _navReason = "";
+        _navIndex = 0;
         ResetStops();
         _bar.SetPair("", _items, "");
         _bar.SetStatus(StripState.Idle, null);
@@ -125,80 +139,154 @@ public sealed class EvidenceSession : IDisposable
         if (pieces.Count == 0) return;
         _sourceWindow = GetForegroundWindow();
 
-        // Label mới, hoặc nhóm trước đã chụp đủ → bắt đầu nhóm mới.
-        if (!pieces[0].IsVar) { _cmdLabel = pieces[0].Value; _items.Clear(); }
-        else if (_stops.Count > 0 && _done.Count == _stops.Count) _items.Clear();
+        // Copy CHỈ điều hướng. Breakpoint chỉ đụng tới khi bấm G, hoặc khi sang nhóm mới (xem StartGroup).
+        var key = CopiedText.Normalize(CopiedText.UnquoteExcel(raw));
+        var now = DateTime.UtcNow;
+        if (key == _navKey && now - _lastCopy < TimeSpan.FromMilliseconds(400)) return;   // lỡ tay Ctrl+C 2 phát
+        _lastCopy = now;
 
-        foreach (var p in pieces.Where(p => p.IsVar))
-            if (!_items.Contains(p.Value, StringComparer.OrdinalIgnoreCase)) _items.Add(p.Value);
+        bool same = key == _navKey;      // copy lại y hệt → sang kết quả kế tiếp
+        _navKey = key;
+        _navReason = "";
+        _askingItem = null;
 
-        ResetStops();
-        Resolve(ask: false);   // chỉ báo; không cướp focus khỏi Excel lúc dev còn đang copy
+        if (!pieces[0].IsVar)
+        {
+            var label = pieces[0].Value;
+            if (Mapping.NormalizeLabel(label) != Mapping.NormalizeLabel(_cmdLabel)) StartGroup();
+            _cmdLabel = label;
+            _nav = BuildLabelNav(label);
+        }
+        else
+        {
+            // Gộp mọi 「」 của lần copy này vào MỘT chuỗi duyệt: đi hết dòng của A rồi sang dòng của B.
+            _nav = BuildVarNav(pieces.Where(p => p.IsVar).Select(p => p.Value).ToList());
+        }
+
+        ShowNav(same);
     }
 
-    List<StopPoint>? Resolve(bool ask)
+    /// <summary>Label khác = nhóm mới: quên chỗ đã chọn và xoá breakpoint của nhóm cũ.</summary>
+    void StartGroup()
     {
-        _bar.SetPair(_cmdLabel, _items, "");
-        if (_items.Count == 0) { _bar.SetStatus(StripState.Idle, null); return null; }
+        _picked.Clear();
+        _items.Clear();
+        ResetStops();
+        if (_bpFiles.Count > 0 && _host.CurrentDte() is { } dte)
+            try { foreach (var f in _bpFiles) VsAutomation.ClearBreakpointsInFile(dte, f); }
+            catch (Exception ex) { _host.Log("Chụp: không xoá được breakpoint nhóm cũ — " + ex.Message); }
+        _bpFiles.Clear();
+    }
+
+    /// <summary>Mọi nhãn khớp label vừa copy. Không có dòng mapping thì tìm ngay trong file .cs đang mở ở VS.</summary>
+    List<NavHit> BuildLabelNav(string label)
+    {
+        var nav = new List<NavHit>();
+        if (_host.CurrentDte() is not { } dte) { _navReason = "Chưa chọn instance VS — mở cửa sổ cấu hình bấm Refresh."; return nav; }
+
+        var row = _host.GetMapRows()?.FirstOrDefault(r => Mapping.NormalizeLabel(r.CmdLabel) == Mapping.NormalizeLabel(label));
+        var csp = row != null ? _host.EffectiveCsPath(row) : VsAutomation.ActiveFile(dte);
+        var prefix = row != null ? row.CsharpLabel : Mapping.CleanLabel(label);
+
+        if (string.IsNullOrWhiteSpace(csp) || !File.Exists(csp))
+        {
+            _navReason = row != null ? $"Không thấy file .cs: {csp}" : "chưa mở file .cs trong VS, hoặc thêm dòng mapping";
+            return nav;
+        }
+
+        foreach (var h in Mapping.FindLabelsByPrefix(File.ReadAllLines(csp), prefix))
+            nav.Add(new NavHit("", "", csp, h.LabelLine, h.ExecLine));
+        if (nav.Count == 0) _navReason = $"Không thấy nhãn bắt đầu bằng \"{prefix}\" trong {Path.GetFileName(csp)}.";
+        return nav;
+    }
+
+    /// <summary>Mọi dòng có biến, TRONG chính nhãn đang đứng. 「goto :X」 thì điều hướng tới nhãn X, không Watch.</summary>
+    List<NavHit> BuildVarNav(IReadOnlyList<string> items)
+    {
+        var nav = new List<NavHit>();
+        if (_cmdLabel.Length == 0) { _navReason = "Chưa copy label."; return nav; }
 
         var rows = _host.GetMapRows();
-        if (rows == null) return Fail("Chưa nạp được mapping.csv — kiểm tra đường dẫn ở cửa sổ cấu hình.");
+        if (rows == null) { _navReason = "Chưa nạp được mapping.csv — kiểm tra đường dẫn ở cửa sổ cấu hình."; return nav; }
 
-        var targets = new List<StopTarget>();
-        foreach (var item in _items)
+        var cur = _navIndex >= 0 && _navIndex < _nav.Count ? _nav[_navIndex] : null;
+
+        foreach (var item in items)
         {
-            // 「goto :X」 → dừng ở dòng đầu label X, không cần Watch; còn lại tra theo label vừa copy.
-            var gotoLabel = CopiedText.GotoTarget(item);
-            var label = gotoLabel ?? _cmdLabel;
-            if (label.Length == 0) return Fail($"Chưa copy label cho 「{item}」.");
+            if (CopiedText.GotoTarget(item) is { } gotoLabel)
+            {
+                nav.AddRange(BuildLabelNav(gotoLabel).Select(h => h with { Item = item }));
+                continue;
+            }
 
-            var res = Mapping.Resolve(rows, label, gotoLabel == null ? item : null);
+            var res = Mapping.Resolve(rows, _cmdLabel, item);
             if (res.Kind == LookupKind.Duplicate)
-                return Fail($"mapping.csv trùng ở dòng {string.Join(", ", res.DuplicateLines!)} — sửa file rồi thử lại.");
+            {
+                _navReason = $"mapping.csv trùng ở dòng {string.Join(", ", res.DuplicateLines!)} — sửa file rồi thử lại.";
+                continue;
+            }
             if (res.Row is not { } row)
             {
-                var known = rows.FirstOrDefault(r => Mapping.NormalizeLabel(r.CmdLabel) == Mapping.NormalizeLabel(label));
-                if (ask)
-                {
-                    _askingItem = item;
-                    _bar.AskInput(gotoLabel != null, item, known?.CsharpLabel ?? "", "");
-                }
-                _bar.SetStatus(StripState.Confirm, ask
-                    ? $"「{item}」 chưa có trong mapping.csv — gõ C# rồi Enter."
-                    : $"「{item}」 chưa có trong mapping.csv — bấm {_settings.GotoCurrentHotkey} để gõ C#.");
-                return null;
+                _askingItem = item;
+                _navReason = $"「{item}」 chưa có trong mapping.csv — bấm {_settings.GotoCurrentHotkey} để gõ C#.";
+                continue;
             }
 
             var csp = _host.EffectiveCsPath(row);
-            if (string.IsNullOrWhiteSpace(csp) || !File.Exists(csp)) return Fail($"Không thấy file .cs: {csp}");
+            if (string.IsNullOrWhiteSpace(csp) || !File.Exists(csp)) { _navReason = $"Không thấy file .cs: {csp}"; continue; }
 
-            var watch = gotoLabel == null ? row.CsharpVar : "";
-            var ll = Mapping.FindLabelLine(csp, row.CsharpLabel, watch);
-            if (ll.Kind != LabelLineKind.Ok)
-                return Fail(ll.Kind switch
-                {
-                    LabelLineKind.NotFound => $"Không thấy \"{row.CsharpLabel}:\" trong {Path.GetFileName(csp)}.",
-                    LabelLineKind.Multiple => $"\"{row.CsharpLabel}:\" xuất hiện ở dòng {string.Join(", ", ll.MatchLines!)}.",
-                    LabelLineKind.NoExecutableLine => $"Sau \"{row.CsharpLabel}:\" không còn dòng thực thi.",
-                    _ => $"Không thấy biểu thức \"{watch}\" sau \"{row.CsharpLabel}:\".",
-                });
-            targets.Add(new StopTarget(csp, ll.Line, ll.LabelLine, watch, item));
+            var lines = File.ReadAllLines(csp);
+            var hits = Mapping.FindLabelsByPrefix(lines, row.CsharpLabel);
+            if (hits.Count == 0) { _navReason = $"Không thấy \"{row.CsharpLabel}:\" trong {Path.GetFileName(csp)}."; continue; }
 
-            // Mệnh đề if: ảnh 1 ở dòng if (giá trị thật) → chụp xong app SET cho mệnh đề ĐÚNG → ảnh 2 ở lệnh đầu nhánh.
-            if (gotoLabel == null && IfClause.IsIf(item) && Mapping.IsExpression(watch))
+            // Đang đứng ở một nhãn khớp rồi thì tìm trong chính nhãn đó, đừng nhảy về nhãn đầu tiên.
+            int labelLine = cur != null && string.Equals(cur.File, csp, StringComparison.OrdinalIgnoreCase)
+                            && hits.Any(h => h.LabelLine == cur.LabelLine)
+                ? cur.LabelLine
+                : hits[0].LabelLine;
+
+            var found = Mapping.FindInLabel(lines, labelLine, row.CsharpVar);
+            if (found.Count == 0)
             {
-                targets[^1] = targets[^1] with { Condition = watch };
-                if (Mapping.BranchStart(File.ReadAllLines(csp), ll.Line) is { } branch)
-                    targets.Add(new StopTarget(csp, branch.Line, ll.LabelLine, watch, item, branch.Column));
-                else
-                    _host.Log($"Chụp: không tìm được lệnh đầu nhánh của {Path.GetFileName(csp)}:{ll.Line} — chỉ chụp dòng if.");
+                _navReason = $"Không thấy \"{row.CsharpVar}\" trong nhãn ở dòng {labelLine} của {Path.GetFileName(csp)}.";
+                continue;
             }
+            foreach (var ln in found) nav.Add(new NavHit(item, row.CsharpVar, csp, labelLine, ln));
+        }
+        return nav;
+    }
+
+    /// <summary>Cuộn + bôi đen chỗ đang chọn, báo tìm được mấy chỗ. Không cướp focus: user còn đang copy ở Excel.</summary>
+    void ShowNav(bool same)
+    {
+        if (_nav.Count == 0)
+        {
+            _bar.SetPair(_cmdLabel, _items, "không thấy");
+            _bar.SetStatus(StripState.Block, _navReason.Length > 0 ? _navReason : "Không tìm thấy.");
+            return;
         }
 
-        var stops = Mapping.GroupStops(targets);
-        _bar.SetPair(_cmdLabel, _items, TargetText(stops, 0));
-        _bar.SetStatus(StripState.Pending, null);
-        return stops;
+        _navIndex = same ? (_navIndex + 1) % _nav.Count : 0;
+        var h = _nav[_navIndex];
+
+        // Biến → dòng lệnh; label → dòng khai báo nhãn (bôi đen cho user đọc được nhãn), nhưng G vẫn đặt BP ở h.Line.
+        int line = h.Watch.Length > 0 ? h.Line : h.LabelLine;
+        if (_host.CurrentDte() is { } dte)
+            try { _host.Log("Điều hướng: " + VsAutomation.GoToLine(dte, h.File, line, select: true, activate: false)); }
+            catch (Exception ex) { _host.Log("Điều hướng: lỗi thao tác VS — " + ex.Message); }
+
+        var what = h.Watch.Length > 0 ? h.Watch : h.Item.Length > 0 ? h.Item : "label";
+        var where = $"{what} · {Path.GetFileName(h.File)}:{line}";
+        if (_nav.Count == 1)
+        {
+            _bar.SetPair(_cmdLabel, _items, $"1 dòng · {where}");
+            _bar.SetStatus(StripState.Ok, null);
+        }
+        else
+        {
+            _bar.SetPair(_cmdLabel, _items, $"{_nav.Count} dòng – đang ở {_navIndex + 1} · {where}");
+            _bar.SetStatus(StripState.Confirm, "copy lại để sang dòng kế tiếp");
+        }
     }
 
     /// <summary>Enter trong ô C# trên thanh: kiểm với code, ghi thêm dòng vào mapping.csv rồi chạy luôn như G.</summary>
@@ -218,6 +306,9 @@ public sealed class EvidenceSession : IDisposable
         }
 
         _askingItem = null;
+        _navReason = "";
+        _nav = BuildVarNav(new[] { item });   // vừa có dòng mapping → dựng lại chỗ dừng rồi mới đặt breakpoint
+        ShowNav(same: false);
         Run();
     }
 
@@ -227,8 +318,39 @@ public sealed class EvidenceSession : IDisposable
     public void Run()
     {
         if (!_active) return;
-        if (_items.Count == 0) { Block("Chưa copy 「…」 từ file test case."); return; }
-        if (Resolve(ask: true) is not { } stops) { Beep(StripState.Block); return; }
+
+        // Hai loại đỏ khác nhau: thiếu mapping thì đây đúng là lúc mở ô gõ C#; không tìm thấy trong file thì chặn.
+        if (_askingItem is { } asking)
+        {
+            var known = _host.GetMapRows()?.FirstOrDefault(r => Mapping.NormalizeLabel(r.CmdLabel) == Mapping.NormalizeLabel(_cmdLabel));
+            _bar.AskInput(CopiedText.GotoTarget(asking) != null, asking, known?.CsharpLabel ?? "", "");
+            _bar.SetStatus(StripState.Confirm, $"「{asking}」 chưa có trong mapping.csv — gõ C# rồi Enter.");
+            return;
+        }
+
+        if (_nav.Count == 0) { Block("Chưa copy, hoặc không tìm thấy — copy lại label/biến."); return; }
+
+        var h = _nav[_navIndex];
+        if (h.Line == 0) { Block($"Sau nhãn ở dòng {h.LabelLine} không còn dòng thực thi."); return; }
+
+        // Mỗi điểm dừng chỉ Watch biến của đúng dòng đó — bấm G lần nữa ở dòng khác là thêm một ảnh nữa.
+        _picked.RemoveAll(p => string.Equals(p.File, h.File, StringComparison.OrdinalIgnoreCase)
+                               && p.Line == h.Line && p.Watch == h.Watch);
+        _picked.Add(new StopTarget(h.File, h.Line, h.LabelLine, h.Watch, h.Item));
+
+        if (IfClause.IsLoop(h.Item))
+            _host.Log($"Chụp: 「{h.Item}」 là vòng lặp — chỉ điều hướng + chụp, không sinh lệnh SET.");
+        else if (IfClause.IsIf(h.Item) && Mapping.IsExpression(h.Watch))
+        {
+            // Mệnh đề if: ảnh 1 ở dòng if (giá trị thật) → chụp xong app SET cho mệnh đề ĐÚNG → ảnh 2 ở lệnh đầu nhánh.
+            _picked[^1] = _picked[^1] with { Condition = h.Watch };
+            if (Mapping.BranchStart(File.ReadAllLines(h.File), h.Line) is { } branch)
+                _picked.Add(new StopTarget(h.File, branch.Line, h.LabelLine, h.Watch, h.Item, branch.Column));
+            else
+                _host.Log($"Chụp: không tìm được lệnh đầu nhánh của {Path.GetFileName(h.File)}:{h.Line} — chỉ chụp dòng if.");
+        }
+
+        var stops = Mapping.GroupStops(_picked);
         if (_host.CurrentDte() is not { } dte) { Block("Chưa chọn instance VS — mở cửa sổ cấu hình bấm Refresh."); return; }
 
         try
@@ -246,6 +368,11 @@ public sealed class EvidenceSession : IDisposable
         ResetStops();
         _stops = stops;
         _bpFiles = stops.Select(s => s.File).ToList();
+
+        // TcId = label + 「items」 là khoá chống chụp trùng giá trị — quên cập nhật là cái gác đó hỏng âm thầm.
+        _items.Clear();
+        foreach (var it in _picked.Select(p => p.Item).Where(i => i.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase))
+            _items.Add(it);
 
         // Định danh thuần thì breakpoint rơi vào dòng đầu sau label — giá trị có thể chưa được gán ở đó.
         foreach (var s in stops)
@@ -442,12 +569,6 @@ public sealed class EvidenceSession : IDisposable
         var text = string.Join(Environment.NewLine, exprs);
         if (_clip != null) _clip.IgnoreText = text;   // đừng tự nhận lại biểu thức mình vừa copy
         try { Clipboard.SetText(text); } catch { /* clipboard bận */ }
-    }
-
-    List<StopPoint>? Fail(string reason)
-    {
-        _bar.SetStatus(StripState.Block, reason);
-        return null;
     }
 
     void Block(string reason)
