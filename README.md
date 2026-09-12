@@ -26,6 +26,11 @@ dotnet publish src/SendKeyDemo/SendKeyDemo.csproj -c Release -r win-x64 --self-c
   đúng menu đó, nhưng Windows hay giấu icon khay vào mục ẩn nên thanh nổi là đường chắc hơn.)
 - Cấu hình (hotkey, `SaveFolder`, `ClipboardWidthInches`/`ClipboardHeightInches` = cỡ ảnh khi dán vào Excel)
   nằm trong `settings.json` cạnh exe, lần đầu chạy tự tạo.
+- App **im lặng** mặc định: không ding, không buzz, hộp thoại cũng không kêu. Đặt `"Silent": false` trong
+  `settings.json` để bật lại tiếng.
+
+  ⚠ Im lặng rồi thì **thanh nổi là kênh phản hồi duy nhất** — trước đây ding/buzz là cách biết kết quả
+  khi đang nhìn Excel hoặc VS. Nên đặt thanh ở chỗ liếc mắt thấy được mà không phải rời tay.
 
 ## mapping.csv
 
@@ -78,7 +83,7 @@ Excel:  Ctrl+C label (không có ngoặc)
           (VS đang dừng ở BẤT KỲ đâu thì Watch điền NGAY lúc bấm G — không cần mũi tên
            vàng ở đúng dòng này; chưa dừng thì thanh ghi "chờ F5, Watch tự điền khi dừng")
         F5 (bạn tự bấm trong VS) → chương trình chạy tới breakpoint thì dừng
-VS:     app xoá Watch cũ, thêm đúng biến của dòng đó, kiểm tra (ding = được, buzz = lỗi)
+VS:     app xoá Watch cũ, thêm đúng biến của dòng đó, chấm trên thanh báo kết quả kiểm
         Ctrl+Shift+S → ảnh vào clipboard → cửa sổ Excel tự nổi lại → Ctrl+V
 ```
 
@@ -201,9 +206,9 @@ App không bao giờ tự gõ phím vào VS, để khỏi gõ nhầm vào file `
 | 12 | Copy `「%RC%」` 2 phát liên tiếp thật nhanh (lỡ tay Ctrl+C) | Thanh **không nhảy** sang dòng kế tiếp |
 | 13 | Copy `「％ＲＣ％」` | Xử lý y như `%RC%` |
 | 14 | Copy một đoạn văn dài không có 「 」 | Thanh không đổi gì |
-| 15 | Bấm `Ctrl+Shift+S` khi chưa `Ctrl+Shift+G` | Buzz, không có ảnh |
+| 15 | Bấm `Ctrl+Shift+S` khi chưa `Ctrl+Shift+G` | Không có ảnh, **không có tiếng nào** (mặc định `Silent`); chấm đỏ + lý do trên thanh là chỗ duy nhất báo |
 | 16 | Đưa về dòng 34, bấm `Ctrl+Shift+G` khi chương trình CHƯA dừng | Trong file chỉ còn 1 breakpoint, ở **dòng 34**; VS nổi lên, tab `Program.cs`, dòng `CHECK_INPUT:` ở đầu vùng nhìn; thanh ghi `chờ F5, Watch tự điền khi dừng` |
-| 16b | Khi đang dừng sẵn ở dòng 34, bấm `Ctrl+Shift+G` lần nữa | Watch điền **ngay** (không phải chờ F5), chấm chuyển màu theo kết quả chấm, và **không** kêu buzz |
+| 16b | Khi đang dừng sẵn ở dòng 34, bấm `Ctrl+Shift+G` lần nữa | Watch điền **ngay**, không phải chờ F5; chấm chuyển màu theo kết quả chấm |
 | 16c | Vẫn đang dừng ở dòng 34, copy `「%HDR_OK%」` để sang `VALIDATE_HEADER`, bấm `Ctrl+Shift+G` | Watch đổi sang `headerOk` **ngay**, dù mũi tên vàng vẫn ở dòng 34. Thanh ghi `Watch đã điền · chờ F5 tới dòng này`, chấm **không** đỏ |
 | 16d | Vẫn đang dừng trong `Program.cs`, copy `RECALC` rồi `「%AMT%」` (2 dòng này pin `csharpFile=Steps.cs`), rồi copy lại `CHECK_INPUT` | `CHECK_INPUT` vẫn tra trong **`Program.cs`** — mốc là file có mũi tên vàng, không trôi sang `Steps.cs` sau khi vừa điều hướng qua đó |
 | 16e | Khi ĐANG DỪNG, bấm `Ctrl+Shift+D` | Breakpoint app đặt biến hết **và cửa sổ Watch sạch**; thanh ghi `đã xoá N điểm dừng · đã làm sạch Watch`, chấm về xám. Bấm lần nữa → `không có điểm dừng nào để xoá · …`. Breakpoint bạn TỰ đặt ở file khác **không** bị xóa |
@@ -211,9 +216,9 @@ App không bao giờ tự gõ phím vào VS, để khỏi gõ nhầm vào file `
 | 16g | Chuột phải vào thanh nổi — thử cả chỗ CÓ CHỮ (tên label, đường dẫn) lẫn chỗ trống | Ra menu giống menu khay, có **Thoát**. Trúng chữ cũng phải ra, không chỉ chỗ trống |
 | 16h | Chuột phải rồi Esc đóng menu | Thanh **không** bị xê dịch. Kéo thanh vẫn phải làm bằng chuột trái |
 | 16i | Chuột phải vào thanh → **Thoát** | Tiến trình `SendKeyDemo` không còn trong Task Manager |
-| 17 | Bấm `Ctrl+Shift+S` khi chưa chạy | Buzz, không có ảnh, báo `❌ Chưa dừng ở breakpoint…` |
-| 18 | Cho chương trình (đang debug sẵn) chạy tới dòng 34 | Watch 1 chỉ còn `rc` và `inputFile.EndsWith(".csv") ? 0 : 12` (dòng cũ bị xoá) — dòng gán nên có cả vế phải; ding; chấm xanh lá. App không tự chạy / khởi động lại debug |
-| 19 | Bấm `Ctrl+Shift+S` | Ding; cửa sổ lúc copy nổi lên; Ctrl+V ra ảnh; thanh `✓ đủ 1 ảnh` |
+| 17 | Bấm `Ctrl+Shift+S` khi chưa chạy | Không có ảnh, chấm đỏ `❌ Chưa dừng ở breakpoint…` |
+| 18 | Cho chương trình (đang debug sẵn) chạy tới dòng 34 | Watch 1 chỉ còn `rc` và `inputFile.EndsWith(".csv") ? 0 : 12` (dòng cũ bị xoá) — dòng gán nên có cả vế phải; chấm xanh lá. App không tự chạy / khởi động lại debug |
+| 19 | Bấm `Ctrl+Shift+S` | Cửa sổ lúc copy nổi lên; Ctrl+V ra ảnh; thanh `✓ đủ 1 ảnh` |
 | 20 | Copy `「%INPUT_FILE%」`, bấm `Ctrl+Shift+G` | Thành 2 điểm dừng, **mỗi điểm 1 biến của test case**: dòng 33 Watch `inputFile` + `"orders.csv"`, dòng 34 Watch `rc` + vế phải. Thanh `1/2` |
 | 20b | Đi tới dòng 35 (dòng log) rồi dòng 36 (dòng `if`), mỗi dòng bấm `Ctrl+Shift+G` | Dòng 35 Watch mỗi `rc`; dòng 36 Watch `rc != 0` — Watch đổi theo hình dạng dòng |
 | 21 | Copy `KHONGCO` rồi `「%RC%」` | Chấm đỏ `「%RC%」 chưa có trong mapping.csv — bấm Ctrl+Shift+G…`; focus vẫn ở chỗ đang copy |

@@ -1176,6 +1176,15 @@ public class AppSettingsTests
         File.Delete(p);
         Assert.Equal("x", s.MappingPath);
         Assert.True(s.TopMost);
+        Assert.True(s.Silent);
+    }
+
+    [Fact]
+    public void Silent_defaults_to_true_so_old_settings_files_are_quiet_too()
+    {
+        Assert.True(new AppSettings().Silent);
+        Assert.Equal(MessageBoxIcon.None, new AppSettings().MsgIcon(MessageBoxIcon.Warning));
+        Assert.Equal(MessageBoxIcon.Warning, new AppSettings { Silent = false }.MsgIcon(MessageBoxIcon.Warning));
     }
 }
 

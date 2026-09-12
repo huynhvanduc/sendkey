@@ -466,7 +466,7 @@ public class MainForm : Form
         if (_mappingPath.Text.Trim() is var m && (m.Length == 0 || !File.Exists(m)))
         {
             MessageBox.Show(this, "Chưa trỏ mapping.csv ở trên.", "Thiếu đường dẫn",
-                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBoxButtons.OK, _settings.MsgIcon(MessageBoxIcon.Warning));
             return;
         }
         _evidence.Start();
@@ -479,7 +479,7 @@ public class MainForm : Form
             MessageBox.Show(this,
                 $"Sắp cửa sổ VS sao cho thấy tab tên file, dòng code và cửa sổ Watch, rồi bấm {_settings.DefineRegionHotkey} " +
                 "để khoanh vùng chụp. Chỉ cần làm một lần cho cả đợt.",
-                "Còn một bước", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                "Còn một bước", MessageBoxButtons.OK, _settings.MsgIcon(MessageBoxIcon.Information));
 
         Hide();   // thu về tray, trên màn hình chỉ còn thanh nổi
     }

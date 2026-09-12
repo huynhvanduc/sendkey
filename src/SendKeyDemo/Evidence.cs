@@ -648,8 +648,10 @@ public sealed class EvidenceSession : IDisposable
         _ => StripState.Block,
     };
 
-    static void Beep(StripState state)
+    void Beep(StripState state)
     {
+        if (_settings.Silent) return;
+
         switch (state)
         {
             case StripState.Ok: SystemSounds.Asterisk.Play(); break;

@@ -40,7 +40,7 @@ static class Program
         MessageBox.Show(
             "SendKey Evidence đang chạy sẵn ở khay hệ thống (góc dưới-phải, có thể phải bấm mũi tên \"^\").\n\n" +
             "Double-click icon đó để mở cửa sổ.",
-            "Đã chạy rồi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            "Đã chạy rồi", MessageBoxButtons.OK, AppSettings.Load().MsgIcon(MessageBoxIcon.Information));
     }
 }
 
@@ -49,6 +49,12 @@ public sealed class AppSettings
     // ---- nửa mapping ----
     public string? MappingPath { get; set; }
     public bool TopMost { get; set; } = true;
+
+    // Mặc định im lặng; đặt false để bật lại ding/buzz.
+    public bool Silent { get; set; } = true;
+
+    // MessageBox tự phát system sound theo icon, nên Silent thì bỏ icon đi.
+    public MessageBoxIcon MsgIcon(MessageBoxIcon wanted) => Silent ? MessageBoxIcon.None : wanted;
 
     // ---- nửa chụp màn hình ----
     public string DefineRegionHotkey { get; set; } = "Ctrl+Shift+R";
