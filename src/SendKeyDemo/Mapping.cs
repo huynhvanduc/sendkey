@@ -20,6 +20,9 @@ public record StopTarget(string File, int Line, int LabelLine, string Watch, str
 /// <summary>LabelLine = dòng khai báo nhãn (để cuộn/bôi đen); ExecLine = dòng thực thi đầu để đặt breakpoint, 0 nếu không có.</summary>
 public record LabelHit(int LabelLine, int ExecLine, string Name);
 
+/// <summary>Kết quả nút "Kiểm tra": Unchecked là dòng chưa soát được vì file chứa nhãn không đang mở.</summary>
+public record ValidateResult(List<string> Problems, int Ok, int Unchecked);
+
 public record LookupResult(
     LookupKind Kind,
     MapRow? Row = null,
@@ -226,9 +229,15 @@ public static class Mapping
         return 0;
     }
 
-    public static List<string> Validate(IReadOnlyList<MapRow> rows, Func<MapRow, IReadOnlyList<string>?> linesFor)
+    /// <summary>
+    /// Một mapping.csv dùng chung cho nhiều class, nên dòng KHÔNG pin csharpFile chỉ soát được với file
+    /// đang mở trong VS — không khớp ở đó là CHƯA KIỂM ĐƯỢC, không phải lỗi. Với những dòng đó, lỗi duy
+    /// nhất còn chắc chắn là trùng cặp cmdLabel+cmdVar, vì nó không phụ thuộc file nào.
+    /// </summary>
+    public static ValidateResult Validate(IReadOnlyList<MapRow> rows, Func<MapRow, IReadOnlyList<string>?> linesFor)
     {
         var problems = new List<string>();
+        int ok = 0, unchecked_ = 0;
 
         var dups = rows
             .GroupBy(r => (NormalizeLabel(r.CmdLabel), NormalizeVar(r.CmdVar)))
@@ -239,10 +248,30 @@ public static class Mapping
         foreach (var r in rows)
         {
             var lines = linesFor(r);
-            if (lines == null) continue;
+
+            // Dòng KHÔNG pin csharpFile: nhãn trùng tên giữa các class là chuyện thường trong code batch
+            // migrate (chương trình nào cũng có INIT: / CLEANUP: / END_PROC:), nên thấy nhãn trong file
+            // đang mở KHÔNG chứng minh là đúng dòng mapping. Mọi kết quả khác Ok chỉ là CHƯA KIỂM ĐƯỢC.
+            if (r.CsharpFile.Trim().Length == 0)
+            {
+                if (lines != null && FindLabelLineInText(lines, r.CsharpLabel, r.CsharpVar).Kind == LabelLineKind.Ok) ok++;
+                else unchecked_++;
+                continue;
+            }
+
+            // Pin đích danh rồi thì mọi kết quả đều là lỗi thật, kể cả không đọc được file.
+            if (lines == null)
+            {
+                problems.Add($"dòng {r.SourceLine}: không đọc được file .cs \"{r.CsharpFile.Trim()}\"");
+                continue;
+            }
+
             var ll = FindLabelLineInText(lines, r.CsharpLabel, r.CsharpVar);
             switch (ll.Kind)
             {
+                case LabelLineKind.Ok:
+                    ok++;
+                    break;
                 case LabelLineKind.NotFound:
                     problems.Add($"dòng {r.SourceLine}: không thấy \"{r.CsharpLabel}:\" trong file .cs");
                     break;
@@ -257,7 +286,7 @@ public static class Mapping
                     break;
             }
         }
-        return problems;
+        return new ValidateResult(problems, ok, unchecked_);
     }
 
     public static LookupResult Resolve(IReadOnlyList<MapRow> rows, string cmdLabelRaw, string? cmdVarRaw)

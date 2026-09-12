@@ -534,7 +534,10 @@ public class MappingTests
             new("CHECK_INPUT", "%RC%", "CHECK_INPUT", "rc", 2),
         };
         var cs = new[] { "  CHECK_INPUT:", "  rc = 0;" };
-        Assert.Empty(Mapping.Validate(rows, _ => cs));
+        var res = Mapping.Validate(rows, _ => cs);
+        Assert.Empty(res.Problems);
+        Assert.Equal(1, res.Ok);
+        Assert.Equal(0, res.Unchecked);
     }
 
     [Fact]
@@ -545,27 +548,63 @@ public class MappingTests
             new("L", "%X%", "L", "x",  2),
             new("L", " %x% ", "L", "x2", 6),
         };
-        var p = Mapping.Validate(rows, _ => null);
-        Assert.Single(p);
-        Assert.Contains("2, 6", p[0]);
+        // Trùng cặp là lỗi DUY NHẤT không phụ thuộc file, nên vẫn báo dù không đọc được file nào.
+        var res = Mapping.Validate(rows, _ => null);
+        Assert.Single(res.Problems);
+        Assert.Contains("2, 6", res.Problems[0]);
     }
 
     [Fact]
-    public void Validate_flags_label_missing_in_cs()
+    public void Validate_label_missing_is_an_error_only_when_the_row_pins_a_file()
     {
-        var rows = new List<MapRow> { new("L", "%X%", "NOSUCH", "x", 3) };
         var cs = new[] { "  L:", "  rc = 0;" };
-        var p = Mapping.Validate(rows, _ => cs);
-        Assert.Single(p);
-        Assert.Contains("dòng 3", p[0]);
-        Assert.Contains("NOSUCH", p[0]);
+        var rows = new List<MapRow> { new("L", "%X%", "NOSUCH", "x", 3, "Other.cs") };
+        var res = Mapping.Validate(rows, _ => cs);
+        Assert.Single(res.Problems);
+        Assert.Contains("dòng 3", res.Problems[0]);
+        Assert.Contains("NOSUCH", res.Problems[0]);
+    }
+
+    [Theory]
+    // Không pin csharpFile thì mọi kết quả khác Ok chỉ là CHƯA KIỂM ĐƯỢC: nhãn cùng tên nằm ở class
+    // khác là chuyện thường trong code batch migrate, nên không chứng minh được dòng mapping sai.
+    [InlineData("NOSUCH", "x")]                  // NotFound
+    [InlineData("L", "zz == 9")]                 // AnchorNotFound
+    public void Validate_unpinned_row_that_does_not_match_is_unchecked_not_an_error(string csLabel, string csVar)
+    {
+        var cs = new[] { "  L:", "  rc = 0;" };
+        var rows = new List<MapRow> { new("L", "%X%", csLabel, csVar, 3) };
+        var res = Mapping.Validate(rows, _ => cs);
+        Assert.Empty(res.Problems);
+        Assert.Equal(0, res.Ok);
+        Assert.Equal(1, res.Unchecked);
     }
 
     [Fact]
-    public void Validate_null_lines_skips_label_checks()
+    public void Validate_duplicate_label_is_unchecked_when_unpinned_but_an_error_when_pinned()
     {
-        var rows = new List<MapRow> { new("L", "%X%", "NOSUCH", "x", 3) };
-        Assert.Empty(Mapping.Validate(rows, _ => null));
+        // Từ đợt 2, nhãn khớp nhiều chỗ là trạng thái BÌNH THƯỜNG của luồng điều hướng (copy lại để duyệt).
+        var cs = new[] { "  L:", "  a();", "  L:", "  b();" };
+
+        var loose = Mapping.Validate(new List<MapRow> { new("L", "%X%", "L", "x", 3) }, _ => cs);
+        Assert.Empty(loose.Problems);
+        Assert.Equal(1, loose.Unchecked);
+
+        var pinned = Mapping.Validate(new List<MapRow> { new("L", "%X%", "L", "x", 3, "A.cs") }, _ => cs);
+        Assert.Single(pinned.Problems);
+        Assert.Contains("2 lần", pinned.Problems[0]);
+    }
+
+    [Fact]
+    public void Validate_unreadable_file_is_an_error_only_for_a_pinned_row()
+    {
+        var loose = Mapping.Validate(new List<MapRow> { new("L", "%X%", "NOSUCH", "x", 3) }, _ => null);
+        Assert.Empty(loose.Problems);
+        Assert.Equal(1, loose.Unchecked);
+
+        var pinned = Mapping.Validate(new List<MapRow> { new("L", "%X%", "NOSUCH", "x", 3, "Gone.cs") }, _ => null);
+        Assert.Single(pinned.Problems);
+        Assert.Contains("Gone.cs", pinned.Problems[0]);
     }
 
     [Fact]
@@ -1103,11 +1142,10 @@ public class AppSettingsTests
     public void Save_then_Load_round_trips()
     {
         var p = Path.GetTempFileName();
-        new AppSettings { MappingPath = @"C:\m.csv", TargetCsPath = @"C:\a.cs", TopMost = false }.Save(p);
+        new AppSettings { MappingPath = @"C:\m.csv", TopMost = false }.Save(p);
         var s = AppSettings.Load(p);
         File.Delete(p);
         Assert.Equal(@"C:\m.csv", s.MappingPath);
-        Assert.Equal(@"C:\a.cs", s.TargetCsPath);
         Assert.False(s.TopMost);
     }
 

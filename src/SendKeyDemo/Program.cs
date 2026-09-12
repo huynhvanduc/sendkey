@@ -48,7 +48,6 @@ public sealed class AppSettings
 {
     // ---- nửa mapping ----
     public string? MappingPath { get; set; }
-    public string? TargetCsPath { get; set; }
     public bool TopMost { get; set; } = true;
 
     // ---- nửa chụp màn hình ----

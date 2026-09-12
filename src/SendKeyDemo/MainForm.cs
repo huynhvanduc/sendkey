@@ -26,10 +26,7 @@ public class MainForm : Form
     // --- mapping mode ---
     readonly TextBox _mappingPath = new() { Dock = DockStyle.Fill };
     readonly Button _mappingBrowse = new() { Text = "Browse...", AutoSize = true };
-    readonly TextBox _targetCs = new() { Dock = DockStyle.Fill };
-    readonly Button _targetBrowse = new() { Text = "Browse...", AutoSize = true };
     readonly Button _mappingOpen = new() { Text = "Mở", AutoSize = true };
-    readonly Button _targetOpen = new() { Text = "Mở", AutoSize = true };
     readonly Button _checkMapping = new() { Text = "Kiểm tra", AutoSize = true };
     readonly Button _clearBpFile = new() { Text = "Xóa BP file này", AutoSize = true };
     readonly Button _copyWatch = new() { Text = "Copy Watch", AutoSize = true };
@@ -93,7 +90,6 @@ public class MainForm : Form
 
         var refreshCell = ButtonCell(_refresh);
         var mappingBtnCell = ButtonCell(_mappingBrowse, _mappingOpen, _checkMapping);
-        var targetBtnCell = ButtonCell(_targetBrowse, _targetOpen);
 
         setup.Controls.Add(RowLabel("Visual Studio"), 0, 0);
         setup.Controls.Add(_instances, 1, 0);
@@ -101,9 +97,6 @@ public class MainForm : Form
         setup.Controls.Add(RowLabel("mapping.csv"), 0, 1);
         setup.Controls.Add(_mappingPath, 1, 1);
         setup.Controls.Add(mappingBtnCell, 2, 1);
-        setup.Controls.Add(RowLabel("target .cs"), 0, 2);
-        setup.Controls.Add(_targetCs, 1, 2);
-        setup.Controls.Add(targetBtnCell, 2, 2);
 
         // ---------- 2. Hành động chính: một nút ----------
         _startEvidence.Font = new Font(Font.FontFamily, 10.5f, FontStyle.Bold);
@@ -194,11 +187,8 @@ public class MainForm : Form
         _checkMapping.Click += (_, _) => KiemTraMapping();
 
         _mappingBrowse.Click += (_, _) => PickFile(_mappingPath, "CSV (*.csv)|*.csv|Tất cả (*.*)|*.*");
-        _targetBrowse.Click += (_, _) => PickFile(_targetCs, "C# (*.cs)|*.cs|Tất cả (*.*)|*.*");
         _mappingOpen.Click += (_, _) => OpenInEditor(_mappingPath.Text);
-        _targetOpen.Click += (_, _) => OpenInEditor(_targetCs.Text);
         _mappingPath.TextChanged += (_, _) => SaveSettings();
-        _targetCs.TextChanged += (_, _) => SaveSettings();
         _topMostBox.CheckedChanged += (_, _) => { TopMost = _topMostBox.Checked; SaveSettings(); };
         _startEvidence.Click += (_, _) => StartClipboardMode();
         _instances.SelectedIndexChanged += (_, _) => _evidence?.AttachWatcher();
@@ -214,7 +204,6 @@ public class MainForm : Form
             _loading = true;
             _settings = AppSettings.Load();
             _mappingPath.Text = _settings.MappingPath ?? "";
-            _targetCs.Text = _settings.TargetCsPath ?? "";
             _topMostBox.Checked = _settings.TopMost;
             TopMost = _settings.TopMost;
             _loading = false;
@@ -250,8 +239,9 @@ public class MainForm : Form
         if (cmdL.Length == 0) return "cmdLabel đang trống.";
         if (csL.Length == 0 || (cmdV.Length > 0 && csV.Length == 0)) return "csharpLabel / csharpVar không được để trống.";   // ca goto: chỉ cần label
 
-        var csPath = _targetCs.Text.Trim();
-        if (csPath.Length == 0 || !File.Exists(csPath)) return $"Không thấy file .cs đích: {csPath}";
+        var csPath = CurrentDte() is { } dte ? VsAutomation.ActiveFile(dte) ?? "" : "";
+        if (csPath.Length == 0 || !File.Exists(csPath))
+            return "Chưa mở file .cs nào trong VS — mở file chứa nhãn rồi thử lại.";
 
         var ll = Mapping.FindLabelLine(csPath, csL, csV);
         switch (ll.Kind)
@@ -287,7 +277,6 @@ public class MainForm : Form
     {
         if (_loading) return;
         _settings.MappingPath = _mappingPath.Text;
-        _settings.TargetCsPath = _targetCs.Text;
         _settings.TopMost = _topMostBox.Checked;
         _settings.Save();
     }
@@ -379,20 +368,25 @@ public class MainForm : Form
             return lines;
         }
 
-        var problems = Mapping.Validate(rows, LinesFor);
-        if (problems.Count == 0)
+        var res = Mapping.Validate(rows, LinesFor);
+
+        // Tách rõ 3 số: gộp "chưa kiểm được" vào OK là để user tưởng đã soát hết cả file.
+        var tail = res.Unchecked > 0
+            ? $", {res.Unchecked} chưa kiểm được (nhãn không có trong file đang mở trong VS)"
+            : "";
+        if (res.Problems.Count == 0)
         {
-            Log($"Kiểm tra mapping.csv: OK — {rows.Count} dòng, không thấy vấn đề.");
+            Log($"Kiểm tra mapping.csv: {rows.Count} dòng — {res.Ok} OK, 0 lỗi{tail}.");
             return;
         }
-        Log($"Kiểm tra mapping.csv: {problems.Count} vấn đề / {rows.Count} dòng:");
-        foreach (var p in problems) Log("  - " + p);
+        Log($"Kiểm tra mapping.csv: {rows.Count} dòng — {res.Ok} OK, {res.Problems.Count} lỗi{tail}:");
+        foreach (var p in res.Problems) Log("  - " + p);
     }
 
     internal string EffectiveCsPath(MapRow row)
     {
         var f = row.CsharpFile.Trim();
-        if (f.Length == 0) return _targetCs.Text.Trim();
+        if (f.Length == 0) return CurrentDte() is { } dte ? VsAutomation.ActiveFile(dte) ?? "" : "";
         if (Path.IsPathRooted(f)) return f;
         var baseDir = Path.GetDirectoryName(_mappingPath.Text.Trim()) ?? "";
         try { return Path.GetFullPath(Path.Combine(baseDir, f)); }
@@ -476,13 +470,6 @@ public class MainForm : Form
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        if (_targetCs.Text.Trim() is var t && (t.Length == 0 || !File.Exists(t)))
-        {
-            MessageBox.Show(this, "Chưa trỏ file .cs đích ở trên.", "Thiếu đường dẫn",
-                MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
         _evidence.Start();
         AfterEvidenceStart();
     }

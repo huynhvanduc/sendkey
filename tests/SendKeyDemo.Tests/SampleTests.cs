@@ -67,14 +67,16 @@ public class BigSampleTests
     public void Every_row_resolves_to_an_executable_line()
     {
         var rows = Mapping.Load(Path.Combine(Dir, "mapping.csv"));
-        var problems = Mapping.Validate(rows, r =>
+        var res = Mapping.Validate(rows, r =>
         {
             var p = r.CsharpFile.Length == 0
                 ? Path.Combine(Dir, "Program.cs")
                 : Path.Combine(Dir, r.CsharpFile);
             return File.Exists(p) ? File.ReadAllLines(p) : null;
         });
-        Assert.Empty(problems);
+        Assert.Empty(res.Problems);
+        Assert.Equal(rows.Count, res.Ok);       // trỏ đúng file cho từng dòng thì không dòng nào bị bỏ sót
+        Assert.Equal(0, res.Unchecked);
     }
 
     // ---------- tc-input-jp.txt: luồng copy từ Excel ----------

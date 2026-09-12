@@ -38,14 +38,21 @@ cmdLabel,cmdVar,csharpLabel,csharpVar[,csharpFile]
   - tên biến (`rc`): breakpoint ở dòng thực thi đầu tiên sau `csharpLabel:`
   - biểu thức (`rc != 0`): breakpoint ở dòng đầu tiên trong label có chứa biểu thức đó
 - `csharpFile` (tùy chọn): file `.cs` riêng cho dòng đó, đường dẫn tuyệt đối hoặc tương đối theo thư mục của
-  `mapping.csv`. Để trống thì dùng ô **target .cs**.
+  `mapping.csv`. Để trống thì dùng **file .cs đang mở trong Visual Studio** — nhờ vậy một `mapping.csv`
+  dùng được cho nhiều class, chỉ cần mở đúng file trước khi copy.
 - Field có `,` hoặc `"` thì bọc trong `"…"`; dấu `"` bên trong viết thành `""`.
 
-Nút **Kiểm tra** cạnh ô mapping.csv soát cặp bị trùng và label không tìm thấy trong code.
+Nút **Kiểm tra** cạnh ô mapping.csv báo 3 số: bao nhiêu dòng **OK**, bao nhiêu **lỗi**, bao nhiêu **chưa kiểm được**.
+
+- Trùng cặp `cmdLabel`+`cmdVar` luôn là **lỗi** — nó không phụ thuộc file nào.
+- Dòng có `csharpFile`: không thấy nhãn, nhãn trùng chỗ, hay không đọc được file đều là **lỗi**.
+- Dòng để trống `csharpFile` chỉ soát được với file đang mở. Không khớp ở đó là **chưa kiểm được**, không
+  phải lỗi: code batch migrate chương trình nào cũng có `INIT:` / `CLEANUP:` / `END_PROC:`, nên thấy nhãn
+  cùng tên trong file đang mở không chứng minh được đó đúng là nhãn của dòng mapping đang xét.
 
 ## Chụp bằng chứng
 
-1. Trỏ **mapping.csv** + **target .cs**, chọn instance VS.
+1. Trỏ **mapping.csv**, chọn instance VS. Không cần trỏ file `.cs` — app luôn dùng file đang mở trong VS.
 2. Bấm **▶ Khởi động**. Cửa sổ thu về khay, trên màn hình chỉ còn thanh nổi.
 3. Sắp cửa sổ VS sao cho thấy tab tên file, dòng code và cửa sổ Watch, rồi bấm `Ctrl+Shift+R` khoanh vùng chụp.
    Chỉ làm 1 lần cho cả đợt. Nếu `settings.json` có `ClipboardWidthInches` / `ClipboardHeightInches` thì hiện
@@ -174,7 +181,8 @@ App không bao giờ tự gõ phím vào VS, để khỏi gõ nhầm vào file `
 |---|---|---|
 | 1 | Mở BigSample trong VS, chạy app | Dropdown có instance VS; bấm `X` là **thoát hẳn** — tiến trình `SendKeyDemo` không còn trong Task Manager |
 | 2 | Mở exe lần nữa | Cửa sổ bản đang chạy nổi lên, không có bản thứ 2 |
-| 3 | Bấm **Kiểm tra** | `Kiểm tra mapping.csv: OK — 28 dòng, không thấy vấn đề.` |
+| 3 | Mở `Program.cs` trong VS rồi bấm **Kiểm tra** | `28 dòng — 28 OK, 0 lỗi.` (25 dòng không pin tra trong `Program.cs`, 3 dòng pin `csharpFile=Steps.cs` tra trong `Steps.cs`) |
+| 3b | Mở `Steps.cs` rồi bấm **Kiểm tra** lại | `28 dòng — 3 OK, 0 lỗi, 25 chưa kiểm được…` — chỉ 3 dòng pin sẵn còn soát được. Điều cần kiểm là **0 lỗi ở cả hai lần**, số OK đổi theo file đang mở là bình thường |
 | 4 | Bấm **▶ Khởi động** | Cửa sổ thu về khay (double-click icon khay mở lại được); thanh nổi hiện `Copy label…`; hộp thoại nhắc khoanh vùng |
 | 5 | `Ctrl+Shift+R`, kéo chọn vùng | Log `Đã nhớ vùng chụp …` |
 | 6 | Copy `CHECK_INPUT` | VS cuộn tới dòng 32, bôi đen `CHECK_INPUT:`; thanh `1 dòng · label · Program.cs:32`, chấm xanh lá. **Excel vẫn giữ focus**, VS không nhảy lên đè |
