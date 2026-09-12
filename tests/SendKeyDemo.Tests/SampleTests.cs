@@ -22,6 +22,20 @@ public class BigSampleTests
         }
     }
 
+    // Luồng điều hướng thật: 「%RC%」 trong CHECK_INPUT rơi vào 3 dòng, mỗi dòng một hình dạng khác nhau
+    // nên Watch của từng dòng cũng phải khác nhau.
+    [Fact]
+    public void Rc_in_CHECK_INPUT_lands_on_three_lines_each_with_its_own_watch()
+    {
+        var lines = File.ReadAllLines(Path.Combine(Dir, "Program.cs"));
+        var label = Assert.Single(Mapping.FindLabelsByPrefix(lines, "CHECK_INPUT"));
+        Assert.Equal(new[] { 34, 35, 36 }, Mapping.FindInLabel(lines, label.LabelLine, "rc"));
+
+        Assert.Equal(new[] { "rc", "inputFile.EndsWith(\".csv\") ? 0 : 12" }, Mapping.WatchFor(lines[33], "rc"));
+        Assert.Equal(new[] { "rc" }, Mapping.WatchFor(lines[34], "rc"));            // dòng log
+        Assert.Equal(new[] { "rc != 0" }, Mapping.WatchFor(lines[35], "rc"));       // dòng if
+    }
+
     // ---------- mapping.csv khớp code ----------
 
     [Fact]

@@ -76,6 +76,18 @@ VS:     app xoá Watch cũ, thêm đúng biến của dòng đó, kiểm tra (di
   bằng `Ctrl+Shift+G` sẽ dừng khi chương trình chạy tới.
 - **Mỗi điểm dừng chỉ Watch biến của đúng dòng đó.** 3 biến nằm ở 3 dòng = 3 ảnh, mỗi ảnh 1 biến: đi tới dòng nào thì
   bấm `Ctrl+Shift+G` ở dòng đó, bấm bao nhiêu lần thì có bấy nhiêu điểm dừng.
+- Watch đổi theo **hình dạng dòng** đang chọn, không phải lúc nào cũng là `csharpVar`:
+
+  | Dòng | Watch |
+  |---|---|
+  | `if (rc != 0) goto HANDLE_ERROR;` | `rc != 0` — chỉ phần trong ngoặc, có `goto` cùng dòng cũng không sao |
+  | `rc = inputFile.EndsWith(".csv") ? 0 : 12;` | `rc` **và** `inputFile.EndsWith(".csv") ? 0 : 12` |
+  | `Console.WriteLine($"… rc={rc}");` | `rc` |
+
+  Dòng gán cần thêm vế phải vì breakpoint dừng **trước** khi dòng chạy, lúc đó biến còn mang giá trị cũ — chụp mỗi
+  biến là ra ảnh sai giá trị. Vế phải lấy **nguyên văn** như trong file (cả dấu nháy, cả tiền tố `@` / `$`), vì app
+  điền Watch bằng cách bôi đen đúng đoạn text đó trong `.cs`. Câu lệnh viết tiếp ở dòng sau (không có `;` cuối dòng)
+  thì chỉ Watch mỗi biến. Vòng lặp `for` / `while` không áp luật `if`.
 - Copy một label **khác** là sang nhóm mới: app quên hết chỗ đã chọn và xoá breakpoint của nhóm cũ.
 - Biến rơi vào nhiều dòng code thì **mỗi dòng 1 ảnh**: thanh hiện `1/2`, chụp xong cho chương trình chạy tiếp tới dòng sau
   rồi chụp tiếp: Ctrl+V ảnh vừa chụp vào Excel TRƯỚC (clipboard chỉ giữ 1 ảnh), rồi bấm F5 trong VS — đang dừng thì F5 chỉ
@@ -172,9 +184,10 @@ App không bao giờ tự gõ phím vào VS, để khỏi gõ nhầm vào file `
 | 15 | Bấm `Ctrl+Shift+S` khi chưa `Ctrl+Shift+G` | Buzz, không có ảnh |
 | 16 | Đưa về dòng 34, bấm `Ctrl+Shift+G` | Trong file chỉ còn 1 breakpoint, ở **dòng 34**; VS nổi lên, tab `Program.cs`, dòng `CHECK_INPUT:` ở đầu vùng nhìn |
 | 17 | Bấm `Ctrl+Shift+S` khi chưa chạy | Buzz, không có ảnh, báo `❌ Chưa dừng ở breakpoint…` |
-| 18 | Cho chương trình (đang debug sẵn) chạy tới dòng 34 | Watch 1 chỉ còn đúng `rc` (dòng cũ bị xoá); ding; chấm xanh lá. App không tự chạy / khởi động lại debug |
+| 18 | Cho chương trình (đang debug sẵn) chạy tới dòng 34 | Watch 1 chỉ còn `rc` và `inputFile.EndsWith(".csv") ? 0 : 12` (dòng cũ bị xoá) — dòng gán nên có cả vế phải; ding; chấm xanh lá. App không tự chạy / khởi động lại debug |
 | 19 | Bấm `Ctrl+Shift+S` | Ding; cửa sổ lúc copy nổi lên; Ctrl+V ra ảnh; thanh `✓ đủ 1 ảnh` |
-| 20 | Copy `「%INPUT_FILE%」`, bấm `Ctrl+Shift+G` | Thành 2 điểm dừng, **mỗi điểm 1 biến**: dòng 33 Watch `inputFile`, dòng 34 Watch `rc`. Thanh `1/2` |
+| 20 | Copy `「%INPUT_FILE%」`, bấm `Ctrl+Shift+G` | Thành 2 điểm dừng, **mỗi điểm 1 biến của test case**: dòng 33 Watch `inputFile` + `"orders.csv"`, dòng 34 Watch `rc` + vế phải. Thanh `1/2` |
+| 20b | Đi tới dòng 35 (dòng log) rồi dòng 36 (dòng `if`), mỗi dòng bấm `Ctrl+Shift+G` | Dòng 35 Watch mỗi `rc`; dòng 36 Watch `rc != 0` — Watch đổi theo hình dạng dòng |
 | 21 | Copy `KHONGCO` rồi `「%RC%」` | Chấm đỏ `「%RC%」 chưa có trong mapping.csv — bấm Ctrl+Shift+G…`; focus vẫn ở chỗ đang copy |
 | 22 | Bấm `Ctrl+Shift+G`, gõ `NOSUCH` / `rc`, Enter | Báo đỏ `Không thấy "NOSUCH:"…`; `mapping.csv` không đổi; ô nhập vẫn mở |
 | 23 | Sửa ô trái thành `END_PROC`, Enter | `mapping.csv` có thêm dòng; VS đặt breakpoint |

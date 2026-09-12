@@ -375,6 +375,73 @@ public class MappingTests
     }
 
     [Theory]
+    // dòng if → mệnh đề, kể cả khi có goto cùng dòng
+    [InlineData("        if (rc != 0) goto HANDLE_ERROR;", "rc", new[] { "rc != 0" })]
+    [InlineData("        if (Check(rc) && (a || b)) { return; }", "rc", new[] { "Check(rc) && (a || b)" })]
+    // COND không nhắc tới biến → về luật chung
+    [InlineData("        if (x != 0) goto E;", "rc", new[] { "rc" })]
+    // dòng gán → biến + vế phải
+    [InlineData("        rc = inputFile.EndsWith(\".csv\") ? 0 : 12;", "rc",
+        new[] { "rc", "inputFile.EndsWith(\".csv\") ? 0 : 12" })]
+    [InlineData("        int rc = a + b;", "rc", new[] { "rc", "a + b" })]
+    [InlineData("        rc = a + b;   // ghi chú", "rc", new[] { "rc", "a + b" })]
+    // vế phải LUÔN vào Watch, kể cả hằng
+    [InlineData("        rc = 0;", "rc", new[] { "rc", "0" })]
+    [InlineData("        inputFile = \"orders.csv\";", "inputFile", new[] { "inputFile", "\"orders.csv\"" })]
+    [InlineData("        decimal discount = 0m;", "discount", new[] { "discount", "0m" })]
+    [InlineData("        ok = true;", "ok", new[] { "ok", "true" })]
+    [InlineData("        s = null;", "s", new[] { "s", "null" })]
+    // không phải phép gán
+    [InlineData("        rc == a + b;", "rc", new[] { "rc" })]
+    [InlineData("        rc += a + b;", "rc", new[] { "rc" })]
+    [InlineData("        a => a + 1", "a", new[] { "a" })]
+    [InlineData("        Console.WriteLine($\"CHECK_INPUT: inputFile={inputFile}, rc={rc}\");", "rc", new[] { "rc" })]
+    // vế trái là biến khác
+    [InlineData("        ok = rc == 0;", "rc", new[] { "rc" })]
+    // vòng lặp không áp luật if
+    [InlineData("        while (rc != 0) { if (rc > 1) break; }", "rc", new[] { "rc" })]
+    [InlineData("        for (int i = 0; rc == 0; i++)", "rc", new[] { "rc" })]
+    public void WatchFor_picks_expressions_by_the_shape_of_the_line(string line, string varName, string[] expected)
+        => Assert.Equal(expected, Mapping.WatchFor(line, varName));
+
+    [Fact]
+    public void WatchFor_keeps_the_text_exactly_as_the_file_has_it()
+    {
+        // SetWatch bôi đen biểu thức nguyên văn trong file .cs — chuẩn hoá khoảng trắng là tìm không ra.
+        Assert.Equal(new[] { "rc", "a  ?  0  :  12" }, Mapping.WatchFor("    rc = a  ?  0  :  12;", "rc"));
+        Assert.Equal(new[] { "rc!=0" }, Mapping.WatchFor("    if (rc!=0) goto E;", "rc"));
+    }
+
+    [Theory]
+    // Chuỗi giữ nguyên cả tiền tố @ / $ lẫn cặp nháy.
+    [InlineData("        a = @$\"{a}mc/m\";", "a", "@$\"{a}mc/m\"")]
+    [InlineData("        path = @\"C:\\a\\b\";", "path", "@\"C:\\a\\b\"")]
+    // "//" trong nháy không phải comment đuôi
+    [InlineData("        url = \"http://x\";", "url", "\"http://x\"")]
+    // "=" trong nháy không phải dấu gán
+    [InlineData("        msg = $\"a=b\";", "msg", "$\"a=b\"")]
+    // ";" trong nháy không phải kết câu
+    [InlineData("        s = \"a;b\";", "s", "\"a;b\"")]
+    // nháy escape trong chuỗi verbatim
+    [InlineData("        q = @\"say \"\"hi\"\"\";", "q", "@\"say \"\"hi\"\"\"")]
+    public void WatchFor_scans_string_literals_before_cutting(string line, string varName, string rhs)
+        => Assert.Equal(new[] { varName, rhs }, Mapping.WatchFor(line, varName));
+
+    [Fact]
+    public void WatchFor_ignores_a_statement_that_continues_on_the_next_line()
+    {
+        Assert.Equal(new[] { "rc" }, Mapping.WatchFor("    rc = a +", "rc"));
+        Assert.Equal(new[] { "rc" }, Mapping.WatchFor("    if (rc != 0 &&", "rc"));
+    }
+
+    [Fact]
+    public void WatchFor_without_a_variable_gives_nothing()
+    {
+        Assert.Empty(Mapping.WatchFor("    rc = 0;", ""));
+        Assert.Empty(Mapping.WatchFor("    rc = 0;", "   "));
+    }
+
+    [Theory]
     [InlineData("rc", false)]
     [InlineData("order.Total", false)]
     [InlineData("rc != 0", true)]

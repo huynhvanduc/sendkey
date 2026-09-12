@@ -333,18 +333,27 @@ public sealed class EvidenceSession : IDisposable
         var h = _nav[_navIndex];
         if (h.Line == 0) { Block($"Sau nhãn ở dòng {h.LabelLine} không còn dòng thực thi."); return; }
 
-        // Mỗi điểm dừng chỉ Watch biến của đúng dòng đó — bấm G lần nữa ở dòng khác là thêm một ảnh nữa.
-        _picked.RemoveAll(p => string.Equals(p.File, h.File, StringComparison.OrdinalIgnoreCase)
-                               && p.Line == h.Line && p.Watch == h.Watch);
-        _picked.Add(new StopTarget(h.File, h.Line, h.LabelLine, h.Watch, h.Item));
+        // Watch đổi theo hình dạng dòng: dòng gán thì thêm cả vế phải, vì breakpoint dừng TRƯỚC khi dòng
+        // chạy nên biến còn mang giá trị cũ. Cùng File+Line nên GroupStops gom lại thành 1 điểm dừng.
+        var src = File.ReadAllLines(h.File);
+        var watches = Mapping.WatchFor(h.Line >= 1 && h.Line <= src.Length ? src[h.Line - 1] : "", h.Watch);
+        if (watches.Count == 0) watches = new List<string> { "" };   // điều hướng theo label: không Watch gì
+
+        // Chọn lại chính dòng này thì thay hẳn mọi Watch cũ của nó.
+        _picked.RemoveAll(p => string.Equals(p.File, h.File, StringComparison.OrdinalIgnoreCase) && p.Line == h.Line);
+
+        int firstNew = _picked.Count;
+        foreach (var w in watches)
+            _picked.Add(new StopTarget(h.File, h.Line, h.LabelLine, w, h.Item));
 
         if (IfClause.IsLoop(h.Item))
             _host.Log($"Chụp: 「{h.Item}」 là vòng lặp — chỉ điều hướng + chụp, không sinh lệnh SET.");
         else if (IfClause.IsIf(h.Item) && Mapping.IsExpression(h.Watch))
         {
             // Mệnh đề if: ảnh 1 ở dòng if (giá trị thật) → chụp xong app SET cho mệnh đề ĐÚNG → ảnh 2 ở lệnh đầu nhánh.
-            _picked[^1] = _picked[^1] with { Condition = h.Watch };
-            if (Mapping.BranchStart(File.ReadAllLines(h.File), h.Line) is { } branch)
+            for (int i = firstNew; i < _picked.Count; i++)
+                _picked[i] = _picked[i] with { Condition = h.Watch };
+            if (Mapping.BranchStart(src, h.Line) is { } branch)
                 _picked.Add(new StopTarget(h.File, branch.Line, h.LabelLine, h.Watch, h.Item, branch.Column));
             else
                 _host.Log($"Chụp: không tìm được lệnh đầu nhánh của {Path.GetFileName(h.File)}:{h.Line} — chỉ chụp dòng if.");

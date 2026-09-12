@@ -331,6 +331,124 @@ public static class Mapping
         }
         return null;
     }
+
+    /// <summary>
+    /// Watch nên điền cho một dòng, theo hình dạng dòng đó: dòng if → mệnh đề; dòng gán → biến + vế phải.
+    /// Dòng gán cần vế phải vì breakpoint dừng TRƯỚC khi dòng chạy, lúc đó biến còn mang giá trị cũ.
+    /// Mọi chuỗi trả về là lát nguyên văn của dòng: SetWatch bôi đen đúng text đó trong file .cs.
+    /// </summary>
+    public static List<string> WatchFor(string line, string varName)
+    {
+        var v = (varName ?? "").Trim();
+        if (v.Length == 0) return new List<string>();
+
+        var text = (line ?? "").Trim();
+        var one = new List<string> { v };
+        var mask = LiteralMask(text);
+
+        // Vòng lặp chỉ điều hướng + chụp: không lôi điều kiện lặp vào Watch.
+        if (!IfClause.IsLoop(text) && IfCondition(text, mask) is { } cond && Mentions(cond, v))
+            return new List<string> { cond };
+
+        int eq = AssignIndex(text, mask);
+        if (eq <= 0) return one;
+
+        // Vế trái có khai báo kiểu thì bỏ kiểu: "int rc" → "rc".
+        var target = text[..eq].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "";
+        if (target != v) return one;
+
+        // Cắt comment đuôi rồi ";" kết câu — cả hai đều bỏ qua cái nằm trong nháy.
+        int end = text.Length;
+        for (int i = eq + 1; i + 1 < text.Length; i++)
+            if (!mask[i] && text[i] == '/' && text[i + 1] == '/') { end = i; break; }
+        while (end > eq + 1 && char.IsWhiteSpace(text[end - 1])) end--;
+
+        // Không kết thúc bằng ";" → câu lệnh còn viết tiếp ở dòng sau, vế phải ở đây chỉ là mảnh cụt.
+        if (end <= eq + 1 || mask[end - 1] || text[end - 1] != ';') return one;
+
+        // Vế phải LUÔN vào Watch, bất kể là số, chuỗi hay biểu thức — user cần thấy đúng giá trị sắp gán.
+        var rhs = text[(eq + 1)..(end - 1)].Trim();
+        return rhs.Length == 0 ? one : new List<string> { v, rhs };
+    }
+
+    static bool Mentions(string haystack, string needle)
+        => _ws.Replace(haystack, " ").Contains(_ws.Replace(needle.Trim(), " "))
+           || _ws.Replace(haystack, "").Contains(_ws.Replace(needle, ""));
+
+    /// <summary>Đánh dấu vị trí nằm trong chuỗi / ký tự, để tìm "=", "//", ";" không dính phần trong nháy.</summary>
+    static bool[] LiteralMask(string text)
+    {
+        var mask = new bool[text.Length];
+        int i = 0;
+        while (i < text.Length)
+        {
+            char quote = text[i];
+            if (quote != '"' && quote != '\'') { i++; continue; }
+
+            // Tiền tố @ / $ / @$ / $@ ngay trước dấu nháy: có @ là chuỗi verbatim, "" bên trong là nháy escape.
+            bool verbatim = false;
+            if (quote == '"')
+                for (int p = i - 1; p >= 0 && (text[p] == '@' || text[p] == '$'); p--)
+                {
+                    if (text[p] == '@') verbatim = true;
+                    mask[p] = true;
+                }
+
+            mask[i] = true;
+            int j = i + 1;
+            while (j < text.Length)
+            {
+                mask[j] = true;
+                if (verbatim)
+                {
+                    if (text[j] == '"')
+                    {
+                        if (j + 1 < text.Length && text[j + 1] == '"') { mask[j + 1] = true; j += 2; continue; }
+                        j++; break;
+                    }
+                }
+                else
+                {
+                    if (text[j] == '\\' && j + 1 < text.Length) { mask[j + 1] = true; j += 2; continue; }
+                    if (text[j] == quote) { j++; break; }
+                }
+                j++;
+            }
+            i = j;
+        }
+        return mask;
+    }
+
+    /// <summary>Nội dung cặp ngoặc ngoài cùng ngay sau "if". Có goto cùng dòng vẫn đúng vì chỉ lấy phần trong ngoặc.</summary>
+    static string? IfCondition(string text, bool[] mask)
+    {
+        var m = _ifHead.Match(text);
+        while (m.Success && mask[m.Index]) m = m.NextMatch();   // "if (" nằm trong nháy thì không tính
+        if (!m.Success) return null;
+
+        int open = m.Index + m.Length - 1;
+        int depth = 0;
+        for (int i = open; i < text.Length; i++)
+        {
+            if (mask[i]) continue;
+            if (text[i] == '(') depth++;
+            else if (text[i] == ')' && --depth == 0) return text[(open + 1)..i].Trim();
+        }
+        return null;
+    }
+
+    // Vị trí dấu "=" của phép gán. Bỏ qua so sánh, lambda và mọi dạng gán kép. -1 nếu dòng không phải phép gán.
+    static int AssignIndex(string text, bool[] mask)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (mask[i] || text[i] != '=') continue;
+            if (i + 1 < text.Length && (text[i + 1] == '=' || text[i + 1] == '>')) { i++; continue; }
+            if (i > 0 && "=!<>+-*/%&|^".Contains(text[i - 1])) continue;
+            return i;
+        }
+        return -1;
+    }
 }
 
 // ==================== CopiedText ====================
