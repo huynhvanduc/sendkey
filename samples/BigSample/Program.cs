@@ -88,20 +88,6 @@ static class Program
     END_PROC:
         Console.WriteLine($"END_PROC: rc={rc}, total={total}");
 
-        // ====================================================================
-        // Phần mở rộng — VẪN NẰM TRONG CÙNG MỘT job flow của Main, vì code
-        // batch migrate là một mạch "nhãn: + goto" tuyến tính, không tách hàm.
-        //
-        // Mỗi đoạn dưới là một họ ca khó để thử SendKeyDemo:
-        //   nhãn cùng prefix · một biến rơi nhiều dòng · Watch đổi theo hình
-        //   dạng dòng · bẫy chuỗi khi cắt vế phải · vòng lặp · các dạng if ·
-        //   hình dạng nhãn · tên biến gần giống · vế trái không phải tên trần ·
-        //   câu lệnh trải nhiều dòng · switch/case · goto nhảy lùi · đủ toán
-        //   tử so sánh · giá trị dài · try/catch.
-        //
-        // Biến khai báo sẵn kèm giá trị đầu để goto nhảy qua lại không gặp
-        // biến chưa gán.
-        // ====================================================================
         int fieldCount = 0;
         string csvRecord = "";
         string header = "";

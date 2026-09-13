@@ -35,9 +35,6 @@ public sealed class EvidenceSession : IDisposable
     IntPtr _sourceWindow;
     (StopPoint Stop, IfBypass Bypass)? _pendingBypass;
 
-    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
-
     public EvidenceSession(MainForm host, AppSettings settings)
     {
         _host = host;
@@ -64,14 +61,11 @@ public sealed class EvidenceSession : IDisposable
         _clip = new ClipboardWatcher();
         _clip.TextCopied += OnCopied;
         _cmdLabel = "";
-        _items.Clear();
-        _picked.Clear();
+        ForgetPicks();
         _nav = new();
         _navKey = _navReason = "";
         _navIndex = 0;
-        ResetStops();
-        _bar.SetPair("", _items, "");
-        _bar.SetStatus(StripState.Idle, null);
+        Show("", StripState.Idle);
         _host.Log("Chụp bằng chứng: bắt đầu — copy label rồi 「biến」 từ Excel.");
     }
 
@@ -82,12 +76,9 @@ public sealed class EvidenceSession : IDisposable
         _watcher?.Dispose();
         _watcher = null;
 
-        if (_clip != null)
-        {
-            _clip.TextCopied -= OnCopied;
-            _clip.Dispose();
-            _clip = null;
-        }
+        if (_clip != null) _clip.TextCopied -= OnCopied;
+        _clip?.Dispose();
+        _clip = null;
 
         if (_active)
         {
@@ -111,30 +102,28 @@ public sealed class EvidenceSession : IDisposable
         catch (Exception ex) { _host.Log("Không bám được sự kiện dừng của VS: " + ex.Message); }
     }
 
-    void OnEnterBreak()
+    void OnEnterBreak() => Post(() => Recheck(fromEvent: true));
+
+    void Post(Action action)
     {
         if (!_bar.IsHandleCreated) return;
-        try { _bar.BeginInvoke(new Action(() => Recheck(fromEvent: true))); }
+        try { _bar.BeginInvoke(action); }
         catch (InvalidOperationException) { /* form đang đóng */ }
     }
 
     // ---------------- nhận cái vừa copy ----------------
 
-    void OnCopied(string raw)
-    {
-        if (!_bar.IsHandleCreated) return;
-        try { _bar.BeginInvoke(new Action(() => ApplyCopied(raw))); }
-        catch (InvalidOperationException) { }
-    }
+    void OnCopied(string raw) => Post(() => ApplyCopied(raw));
 
     void ApplyCopied(string raw)
     {
-        if (!_active) return;
+        // Đang gõ C# thì Ctrl+C là để dán vào ô, không phải để điều hướng.
+        if (!_active || _bar.Asking) return;
 
         // Quy tắc duy nhất: trong 「 」 là biến/mệnh đề (1 ô có thể nhiều cặp), ngoài ngoặc là label.
         var pieces = CopiedText.ClassifyAll(raw);
         if (pieces.Count == 0) return;
-        _sourceWindow = GetForegroundWindow();
+        _sourceWindow = Native.GetForegroundWindow();
 
         // Copy CHỈ điều hướng; breakpoint chỉ đụng tới khi bấm G hoặc khi sang nhóm mới.
         var key = CopiedText.Normalize(CopiedText.UnquoteExcel(raw));
@@ -180,22 +169,17 @@ public sealed class EvidenceSession : IDisposable
                 : " · không xoá được Watch, xoá tay giúp";
         }
 
-        _picked.Clear();
-        _items.Clear();
-        ResetStops();
+        ForgetPicks();
         _bpFiles.Clear();
 
         var msg = (n > 0 ? $"đã xoá {n} điểm dừng" : "không có điểm dừng nào để xoá") + watchNote;
-        _bar.SetPair(_cmdLabel, _items, msg);
-        _bar.SetStatus(StripState.Idle, null);
+        Show(msg, StripState.Idle);
         _host.Log("Chụp: " + msg + " — copy lại label/biến rồi bấm " + _settings.GotoCurrentHotkey + ".");
     }
 
     void StartGroup()
     {
-        _picked.Clear();
-        _items.Clear();
-        ResetStops();
+        ForgetPicks();
         if (_bpFiles.Count > 0 && _host.CurrentDte() is { } dte)
             try { foreach (var f in _bpFiles) VsAutomation.ClearBreakpointsInFile(dte, f); }
             catch (Exception ex) { _host.Log("Chụp: không xoá được breakpoint nhóm cũ — " + ex.Message); }
@@ -280,12 +264,7 @@ public sealed class EvidenceSession : IDisposable
 
     void ShowNav(bool same)
     {
-        if (_nav.Count == 0)
-        {
-            _bar.SetPair(_cmdLabel, _items, "không thấy");
-            _bar.SetStatus(StripState.Block, _navReason.Length > 0 ? _navReason : "Không tìm thấy.");
-            return;
-        }
+        if (_nav.Count == 0) { Show("không thấy", StripState.Block, _navReason.Length > 0 ? _navReason : "Không tìm thấy."); return; }
 
         _navIndex = same ? (_navIndex + 1) % _nav.Count : 0;
         var h = _nav[_navIndex];
@@ -298,16 +277,8 @@ public sealed class EvidenceSession : IDisposable
 
         var what = h.Watch.Length > 0 ? h.Watch : h.Item.Length > 0 ? h.Item : "label";
         var where = $"{what} · {Path.GetFileName(h.File)}:{line}";
-        if (_nav.Count == 1)
-        {
-            _bar.SetPair(_cmdLabel, _items, $"1 dòng · {where}");
-            _bar.SetStatus(StripState.Ok, null);
-        }
-        else
-        {
-            _bar.SetPair(_cmdLabel, _items, $"{_nav.Count} dòng – đang ở {_navIndex + 1} · {where}");
-            _bar.SetStatus(StripState.Confirm, "copy lại để sang dòng kế tiếp");
-        }
+        if (_nav.Count == 1) Show($"1 dòng · {where}", StripState.Ok);
+        else Show($"{_nav.Count} dòng – đang ở {_navIndex + 1} · {where}", StripState.Confirm, "copy lại để sang dòng kế tiếp");
     }
 
     void OnInputSubmitted(string csLabel, string csVar)
@@ -413,29 +384,18 @@ public sealed class EvidenceSession : IDisposable
             var pick = stops.FirstOrDefault(x => x.Line == h.Line && x.Column == 0 &&
                                                  string.Equals(x.File, h.File, StringComparison.OrdinalIgnoreCase))
                        ?? stops[0];
-            try
-            {
-                var missed = VsAutomation.SetWatch(dte, pick.File, pick.LabelLine, pick.Watch);
-                if (missed is not { Count: 0 })
-                {
-                    var manual = missed ?? pick.Watch.ToList();
-                    CopyForManualWatch(manual);
-                    if (manual.Count > 0) _host.Log($"Chụp: đã copy {string.Join(", ", manual)} — Ctrl+V vào Watch.");
-                }
-            }
+            try { if (FillWatch(dte, pick) is { } manual) _host.Log($"Chụp: đã copy {string.Join(", ", manual)} — Ctrl+V vào Watch."); }
             catch (Exception ex) { _host.Log("Chụp: lỗi điền Watch — " + ex.Message); }
 
             // Dừng khác dòng thì Evaluate trả Block, là bình thường lúc chưa chạy tới — đừng báo đỏ.
             if (IsAt(pick, VsAutomation.ReadDebugState(dte, "", Array.Empty<string>()))) { Recheck(); return; }
 
-            _bar.SetPair(_cmdLabel, _items, $"{TargetText(stops, 0)} · Watch đã điền · chờ F5 tới dòng này");
-            _bar.SetStatus(StripState.Pending, null);
+            Show($"{TargetText(stops, 0)} · Watch đã điền · chờ F5 tới dòng này", StripState.Pending);
             return;
         }
 
         // Thanh chỉ hiện dòng lý do khi vàng/đỏ, nên phải nói đang chờ gì ngay ở dòng 1.
-        _bar.SetPair(_cmdLabel, _items, $"{TargetText(stops, 0)} · chờ F5, Watch tự điền khi dừng");
-        _bar.SetStatus(StripState.Pending, null);
+        Show($"{TargetText(stops, 0)} · chờ F5, Watch tự điền khi dừng", StripState.Pending);
     }
 
     // ---------------- chấm + chụp ----------------
@@ -465,13 +425,7 @@ public sealed class EvidenceSession : IDisposable
         {
             try
             {
-                var missed = VsAutomation.SetWatch(dte, stop.File, stop.LabelLine, stop.Watch);
-                if (missed is not { Count: 0 })
-                {
-                    var manual = missed ?? stop.Watch.ToList();
-                    CopyForManualWatch(manual);
-                    if (manual.Count > 0) note = $" Đã copy {string.Join(", ", manual)} — Ctrl+V vào Watch.";
-                }
+                if (FillWatch(dte, stop) is { } manual) note = $" Đã copy {string.Join(", ", manual)} — Ctrl+V vào Watch.";
                 labelShown = VsAutomation.ShowLabel(dte, stop.File, stop.LabelLine, stop.Line);
             }
             catch (Exception ex) { note = " Lỗi điền Watch: " + ex.Message; }
@@ -488,8 +442,7 @@ public sealed class EvidenceSession : IDisposable
             result = new CheckResult(CheckLevel.Confirm,
                 $"Không thấy dòng label (dòng {stop.LabelLine}) trong editor — nới cửa sổ code để ảnh thấy label.");
 
-        _bar.SetPair(_cmdLabel, _items, TargetText(_stops, _stops.IndexOf(stop)));
-        _bar.SetStatus(LevelToState(result.Level), result.Level == CheckLevel.Ok ? null : result.Message);
+        Show(TargetText(_stops, _stops.IndexOf(stop)), LevelToState(result.Level), result.Level == CheckLevel.Ok ? null : result.Message);
         if (fromEvent) Beep(LevelToState(result.Level));
         return result;
     }
@@ -524,12 +477,7 @@ public sealed class EvidenceSession : IDisposable
         _confirmed = null;
 
         var shot = ScreenCapture.GrabClean(region, _settings, _bar);
-        if (!shot.Ok)
-        {
-            Block(shot.Message);
-            _host.Log("Chụp: " + shot.Message);
-            return;
-        }
+        if (!shot.Ok) { Block(shot.Message); _host.Log("Chụp: " + shot.Message); return; }
 
         var stop = _stops[_currentStop];
         if (_host.CurrentDte() is { } dteNow)
@@ -556,14 +504,12 @@ public sealed class EvidenceSession : IDisposable
         }
 
         bool all = _done.Count == _stops.Count;
-        _bar.SetPair(_cmdLabel, _items, all
-            ? $"✓ đủ {_stops.Count} ảnh — copy test case tiếp"
-            : $"Ctrl+V rồi F5 trong VS → {TargetText(_stops, NextStop())}");
-        _bar.SetStatus(bypassNote != null ? bypassState : all ? StripState.Ok : StripState.Pending, bypassNote);
+        Show(all ? $"✓ đủ {_stops.Count} ảnh — copy test case tiếp" : $"Ctrl+V rồi F5 trong VS → {TargetText(_stops, NextStop())}",
+            bypassNote != null ? bypassState : all ? StripState.Ok : StripState.Pending, bypassNote);
         if (_pendingBypass is { } pending) _bar.AskValue(pending.Bypass.Var, pending.Bypass.Value);   // sau SetPair (SetPair ẩn ô)
         if (bypassNote != null) Beep(bypassState);
 
-        if (_sourceWindow != IntPtr.Zero) SetForegroundWindow(_sourceWindow);
+        if (_sourceWindow != IntPtr.Zero) Native.SetForegroundWindow(_sourceWindow);
     }
 
     (string? Note, StripState State) ApplyBypass(StopPoint stop, IfBypass bypass)
@@ -595,6 +541,20 @@ public sealed class EvidenceSession : IDisposable
         return $"{what} · {Path.GetFileName(s.File)}:{s.Line}{col}" + (stops.Count > 1 ? $" · {i + 1}/{stops.Count}" : "");
     }
 
+    // Thanh luôn hiện cặp label + biến đang chọn kèm đích và trạng thái, nên gom SetPair + SetStatus làm một.
+    void Show(string target, StripState state, string? reason = null)
+    {
+        _bar.SetPair(_cmdLabel, _items, target);
+        _bar.SetStatus(state, reason);
+    }
+
+    void ForgetPicks()
+    {
+        _picked.Clear();
+        _items.Clear();
+        ResetStops();
+    }
+
     void ResetStops()
     {
         _stops = new();
@@ -605,23 +565,21 @@ public sealed class EvidenceSession : IDisposable
         _pendingBypass = null;
     }
 
-    int NextStop()
-    {
-        for (int i = 0; i < _stops.Count; i++)
-            if (!_done.Contains(i)) return i;
-        return Math.Max(0, _stops.Count - 1);
-    }
+    int NextStop() => Enumerable.Range(0, _stops.Count).FirstOrDefault(i => !_done.Contains(i), Math.Max(0, _stops.Count - 1));
 
-    static bool IsAt(StopPoint s, DebugSnapshot hit)
-        => hit.HitLine == s.Line && hit.HitFile.Length > 0 &&
-           string.Equals(Path.GetFullPath(hit.HitFile), Path.GetFullPath(s.File), StringComparison.OrdinalIgnoreCase);
+    static bool IsAt(StopPoint s, DebugSnapshot hit) => hit.HitLine == s.Line && CaptureCheck.SameFile(hit.HitFile, s.File);
 
-    void CopyForManualWatch(IReadOnlyList<string> exprs)
+    // Không tự điền được thì copy sẵn biểu thức cho user Ctrl+V; trả về cái đã copy, không có thì null.
+    List<string>? FillWatch(EnvDTE.DTE dte, StopPoint stop)
     {
-        if (exprs.Count == 0) return;
-        var text = string.Join(Environment.NewLine, exprs);
+        var missed = VsAutomation.SetWatch(dte, stop.File, stop.LabelLine, stop.Watch);
+        if (missed is { Count: 0 }) return null;
+        var manual = missed ?? stop.Watch.ToList();
+        if (manual.Count == 0) return null;
+        var text = string.Join(Environment.NewLine, manual);
         if (_clip != null) _clip.IgnoreText = text;   // đừng tự nhận lại biểu thức mình vừa copy
-        try { Clipboard.SetText(text); } catch { /* clipboard bận */ }
+        Safe.Try(() => Clipboard.SetText(text));   // clipboard có thể đang bận
+        return manual;
     }
 
     void Block(string reason)
@@ -630,34 +588,19 @@ public sealed class EvidenceSession : IDisposable
         Beep(StripState.Block);
     }
 
-    static bool? LineMentions(string file, int line, string ident)
+    static bool? LineMentions(string file, int line, string ident) => Safe.Try<bool?>(() =>
     {
-        try
-        {
-            var lines = File.ReadAllLines(file);
-            if (line < 1 || line > lines.Length) return null;
-            return lines[line - 1].Contains(ident, StringComparison.Ordinal);
-        }
-        catch { return null; }
-    }
+        var lines = File.ReadAllLines(file);
+        return line < 1 || line > lines.Length ? null : lines[line - 1].Contains(ident, StringComparison.Ordinal);
+    }, null);
 
-    static StripState LevelToState(CheckLevel level) => level switch
-    {
-        CheckLevel.Ok => StripState.Ok,
-        CheckLevel.Confirm => StripState.Confirm,
-        _ => StripState.Block,
-    };
+    static StripState LevelToState(CheckLevel level)
+        => level switch { CheckLevel.Ok => StripState.Ok, CheckLevel.Confirm => StripState.Confirm, _ => StripState.Block };
 
     void Beep(StripState state)
     {
         if (_settings.Silent) return;
-
-        switch (state)
-        {
-            case StripState.Ok: SystemSounds.Asterisk.Play(); break;
-            case StripState.Confirm: SystemSounds.Exclamation.Play(); break;
-            case StripState.Block: SystemSounds.Hand.Play(); break;
-        }
+        (state switch { StripState.Ok => SystemSounds.Asterisk, StripState.Confirm => SystemSounds.Exclamation, StripState.Block => SystemSounds.Hand, _ => null })?.Play();
     }
 
     public void Dispose()
@@ -670,7 +613,7 @@ public sealed class EvidenceSession : IDisposable
 
 public enum StripState { Idle, Pending, Ok, Confirm, Block }
 
-public sealed class EvidenceBarForm : Form
+public sealed class EvidenceBarForm : OverlayForm
 {
     const int BarWidth = 640;   // đơn vị 96-dpi, quy đổi theo màn hình lúc hiện
 
@@ -699,16 +642,11 @@ public sealed class EvidenceBarForm : Form
 
     protected override bool ShowWithoutActivation => true;
 
-    [DllImport("user32.dll")] static extern bool ReleaseCapture();
-    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+    public bool Asking => _csLabel.Visible;
 
     public EvidenceBarForm()
     {
-        FormBorderStyle = FormBorderStyle.None;
         MaximizeBox = false;
-        ShowInTaskbar = false;
-        TopMost = true;
-        StartPosition = FormStartPosition.Manual;
         AutoScaleMode = AutoScaleMode.Dpi;
         Padding = new Padding(2);                      // chừa viền màu trạng thái
         BackColor = Theme.PanelBackground;
@@ -870,6 +808,13 @@ public sealed class EvidenceBarForm : Form
 
     void OnFieldKeyDown(object? sender, KeyEventArgs e)
     {
+        // Esc bỏ ô gõ C# để app nghe copy lại mà không cần Enter thành công.
+        if (e.KeyCode == Keys.Escape && sender != _value)
+        {
+            e.SuppressKeyPress = true;
+            SetInputVisible(false);
+            return;
+        }
         if (e.KeyCode is not (Keys.Enter or Keys.Return)) return;
         e.SuppressKeyPress = true;
         if (sender == _value) { ValueSubmitted?.Invoke(_value.Text.Trim()); return; }
@@ -898,8 +843,8 @@ public sealed class EvidenceBarForm : Form
         if (e.Button != MouseButtons.Left) return;
         if (e.Clicks >= 2) { OpenConfigRequested?.Invoke(); return; }
         const int WM_NCLBUTTONDOWN = 0xA1, HTCAPTION = 2;
-        ReleaseCapture();
-        SendMessage(Handle, WM_NCLBUTTONDOWN, (IntPtr)HTCAPTION, IntPtr.Zero);
+        Native.ReleaseCapture();
+        Native.SendMessage(Handle, WM_NCLBUTTONDOWN, (IntPtr)HTCAPTION, IntPtr.Zero);
     }
 
     static string Clip(string s, int max) => s.Length <= max ? s : s[..(max - 1)] + "…";
@@ -925,9 +870,6 @@ public sealed class ClipboardWatcher : NativeWindow, IDisposable
 {
     const int WM_CLIPBOARDUPDATE = 0x031D;
 
-    [DllImport("user32.dll", SetLastError = true)] static extern bool AddClipboardFormatListener(IntPtr hwnd);
-    [DllImport("user32.dll", SetLastError = true)] static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
-
     public string? IgnoreText { get; set; }
 
     public event Action<string>? TextCopied;
@@ -935,7 +877,7 @@ public sealed class ClipboardWatcher : NativeWindow, IDisposable
     public ClipboardWatcher()
     {
         CreateHandle(new CreateParams());
-        AddClipboardFormatListener(Handle);
+        Native.AddClipboardFormatListener(Handle);
     }
 
     protected override void WndProc(ref Message m)
@@ -964,7 +906,7 @@ public sealed class ClipboardWatcher : NativeWindow, IDisposable
 
     public void Dispose()
     {
-        try { RemoveClipboardFormatListener(Handle); } catch { /* handle đã chết */ }
+        Safe.Try(() => Native.RemoveClipboardFormatListener(Handle));   // handle có thể đã chết
         DestroyHandle();
     }
 }

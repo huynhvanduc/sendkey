@@ -21,12 +21,7 @@ public record LabelHit(int LabelLine, int ExecLine, string Name);
 
 public record ValidateResult(List<string> Problems, int Ok, int Unchecked);
 
-public record LookupResult(
-    LookupKind Kind,
-    MapRow? Row = null,
-    IReadOnlyList<string>? VarChoices = null,
-    IReadOnlyList<int>? DuplicateLines = null,
-    string? Warning = null);
+public record LookupResult(LookupKind Kind, MapRow? Row = null, IReadOnlyList<string>? VarChoices = null, IReadOnlyList<int>? DuplicateLines = null);
 
 public class MappingFormatException : Exception
 {
@@ -39,18 +34,14 @@ public static class Mapping
 {
     static readonly Regex _ws = new(@"\s+");
 
-    public static string NormalizeLabel(string raw)
-        => _ws.Replace((raw ?? "").Trim(), " ").TrimStart(':').Trim().ToLowerInvariant();
+    // Gom mọi khoảng trắng liên tiếp thành 1 dấu cách và bỏ 2 đầu.
+    internal static string Squash(string? raw) => _ws.Replace((raw ?? "").Trim(), " ");
 
-    public static string CleanLabel(string raw)
-        => _ws.Replace((raw ?? "").Trim(), " ").Trim(':').Trim();
+    public static string NormalizeLabel(string raw) => Squash(raw).TrimStart(':').Trim().ToLowerInvariant();
 
-    public static string NormalizeVar(string raw)
-    {
-        var s = _ws.Replace((raw ?? "").Trim(), " ");
-        s = Regex.Replace(s, @"^(if|goto)\s+", "", RegexOptions.IgnoreCase);
-        return s.Trim().ToLowerInvariant();
-    }
+    public static string CleanLabel(string raw) => Squash(raw).Trim(':').Trim();
+
+    public static string NormalizeVar(string raw) => Regex.Replace(Squash(raw), @"^(if|goto)\s+", "", RegexOptions.IgnoreCase).Trim().ToLowerInvariant();
 
     public static List<string[]> ParseCsv(string text)
     {
@@ -139,23 +130,19 @@ public static class Mapping
 
     public static LabelLineResult FindLabelLineInText(IReadOnlyList<string> lines, string csharpLabel, string? anchorExpr = null)
     {
-        var rx = new Regex($@"^\s*{Regex.Escape(csharpLabel)}\s*:");
-        var matches = new List<int>();
-        for (int i = 0; i < lines.Count; i++)
-            if (rx.IsMatch(lines[i])) matches.Add(i + 1);
+        var hits = FindLabelsByPrefix(lines, csharpLabel).Where(h => h.Name == csharpLabel).ToList();
+        if (hits.Count == 0) return new LabelLineResult(LabelLineKind.NotFound);
+        if (hits.Count > 1) return new LabelLineResult(LabelLineKind.Multiple, MatchLines: hits.Select(h => h.LabelLine).ToList());
 
-        if (matches.Count == 0) return new LabelLineResult(LabelLineKind.NotFound);
-        if (matches.Count > 1) return new LabelLineResult(LabelLineKind.Multiple, MatchLines: matches);
-
-        int firstExec = FirstExecLine(lines, matches[0]);
+        var (labelLine, firstExec, _) = hits[0];
         if (firstExec == 0) return new LabelLineResult(LabelLineKind.NoExecutableLine);
 
         if (IsExpression(anchorExpr))
-            return FindInLabel(lines, matches[0], anchorExpr!) is { Count: > 0 } found
-                ? new LabelLineResult(LabelLineKind.Ok, found[0], LabelLine: matches[0])
+            return FindInLabel(lines, labelLine, anchorExpr!) is { Count: > 0 } found
+                ? new LabelLineResult(LabelLineKind.Ok, found[0], LabelLine: labelLine)
                 : new LabelLineResult(LabelLineKind.AnchorNotFound);
 
-        return new LabelLineResult(LabelLineKind.Ok, firstExec, LabelLine: matches[0]);
+        return new LabelLineResult(LabelLineKind.Ok, firstExec, LabelLine: labelLine);
     }
 
     public static List<LabelHit> FindLabelsByPrefix(IReadOnlyList<string> lines, string prefix)
@@ -178,26 +165,14 @@ public static class Mapping
         int firstExec = FirstExecLine(lines, labelLine);
         if (firstExec == 0) return hits;
 
-        var aOne = _ws.Replace(expr.Trim(), " ");
-        var aNo = _ws.Replace(expr, "");
-
         // Định danh thuần so theo BIÊN TỪ như SetWatch kẻo "rc" dính "rc2"; biểu thức vẫn so "có chứa".
         var word = IsExpression(expr) ? null : new Regex($@"\b{Regex.Escape(expr.Trim())}\b");
 
-        bool inBlock = false;
-        for (int ln = firstExec; ln <= lines.Count; ln++)
+        foreach (var (ln, raw, t) in CodeLines(lines, firstExec))
         {
-            var raw = lines[ln - 1];
-            var t = raw.Trim();
-            if (inBlock) { if (t.Contains("*/")) inBlock = false; continue; }
             if (ln != firstExec && _anyLabel.IsMatch(raw) && t != "default:" && !t.StartsWith("case "))
                 break;                                   // đã sang nhãn / case khác
-            if (t.StartsWith("//")) continue;
-            if (t.StartsWith("/*")) { if (!t.Contains("*/")) inBlock = true; continue; }
-            bool match = word != null
-                ? word.IsMatch(t)
-                : _ws.Replace(t, " ").Contains(aOne) || _ws.Replace(t, "").Contains(aNo);
-            if (match) hits.Add(ln);
+            if (word?.IsMatch(t) ?? Mentions(t, expr)) hits.Add(ln);
         }
         return hits;
     }
@@ -209,19 +184,22 @@ public static class Mapping
         var tail = colon >= 0 ? labelLine[(colon + 1)..].Trim() : "";
         if (tail.Length > 0 && !tail.StartsWith("//")) return labelLineNo;
 
+        // # = #pragma / #region / #if …
+        return CodeLines(lines, labelLineNo + 1).FirstOrDefault(c => c.Text.Length > 0 && c.Text != "{" && !c.Text.StartsWith("#")).Ln;
+    }
+
+    // Các dòng từ `from` trở đi, đã bỏ comment // và khối /* */.
+    static IEnumerable<(int Ln, string Raw, string Text)> CodeLines(IReadOnlyList<string> lines, int from)
+    {
         bool inBlock = false;
-        for (int ln = labelLineNo + 1; ln <= lines.Count; ln++)
+        for (int ln = from; ln <= lines.Count; ln++)
         {
             var t = lines[ln - 1].Trim();
             if (inBlock) { if (t.Contains("*/")) inBlock = false; continue; }
-            if (t.Length == 0) continue;
             if (t.StartsWith("//")) continue;
-            if (t.StartsWith("#")) continue;                 // #pragma / #region / #if …
             if (t.StartsWith("/*")) { if (!t.Contains("*/")) inBlock = true; continue; }
-            if (t == "{") continue;
-            return ln;
+            yield return (ln, lines[ln - 1], t);
         }
-        return 0;
     }
 
     public static ValidateResult Validate(IReadOnlyList<MapRow> rows, Func<MapRow, IReadOnlyList<string>?> linesFor)
@@ -255,53 +233,28 @@ public static class Mapping
             }
 
             var ll = FindLabelLineInText(lines, r.CsharpLabel, r.CsharpVar);
-            switch (ll.Kind)
+            if (ll.Kind == LabelLineKind.Ok) { ok++; continue; }
+            problems.Add($"dòng {r.SourceLine}: " + (ll.Kind switch
             {
-                case LabelLineKind.Ok:
-                    ok++;
-                    break;
-                case LabelLineKind.NotFound:
-                    problems.Add($"dòng {r.SourceLine}: không thấy \"{r.CsharpLabel}:\" trong file .cs");
-                    break;
-                case LabelLineKind.Multiple:
-                    problems.Add($"dòng {r.SourceLine}: \"{r.CsharpLabel}:\" xuất hiện {ll.MatchLines!.Count} lần trong file .cs");
-                    break;
-                case LabelLineKind.NoExecutableLine:
-                    problems.Add($"dòng {r.SourceLine}: sau \"{r.CsharpLabel}:\" không còn dòng thực thi");
-                    break;
-                case LabelLineKind.AnchorNotFound:
-                    problems.Add($"dòng {r.SourceLine}: không thấy biểu thức \"{r.CsharpVar}\" sau \"{r.CsharpLabel}:\"");
-                    break;
-            }
+                LabelLineKind.NotFound => $"không thấy \"{r.CsharpLabel}:\" trong file .cs",
+                LabelLineKind.Multiple => $"\"{r.CsharpLabel}:\" xuất hiện {ll.MatchLines!.Count} lần trong file .cs",
+                LabelLineKind.NoExecutableLine => $"sau \"{r.CsharpLabel}:\" không còn dòng thực thi",
+                _ => $"không thấy biểu thức \"{r.CsharpVar}\" sau \"{r.CsharpLabel}:\"",
+            }));
         }
         return new ValidateResult(problems, ok, unchecked_);
     }
 
-    public static LookupResult Resolve(IReadOnlyList<MapRow> rows, string cmdLabelRaw, string? cmdVarRaw)
+    public static LookupResult Resolve(IReadOnlyList<MapRow> rows, string cmdLabelRaw, string cmdVarRaw)
     {
         var label = NormalizeLabel(cmdLabelRaw);
         var inLabel = rows.Where(r => NormalizeLabel(r.CmdLabel) == label).ToList();
-        if (inLabel.Count == 0)
-            return new LookupResult(LookupKind.NotFoundLabel);
-
-        if (string.IsNullOrWhiteSpace(cmdVarRaw))
-        {
-            var csl = inLabel[0].CsharpLabel;
-            var mixed = inLabel.Any(r => r.CsharpLabel != csl);
-            return new LookupResult(LookupKind.Ok, inLabel[0],
-                Warning: mixed
-                    ? $"label \"{cmdLabelRaw.Trim()}\" map tới nhiều csharpLabel; dùng \"{csl}\""
-                    : null);
-        }
+        if (inLabel.Count == 0) return new LookupResult(LookupKind.NotFoundLabel);
 
         var v = NormalizeVar(cmdVarRaw);
         var hits = inLabel.Where(r => NormalizeVar(r.CmdVar) == v).ToList();
-        if (hits.Count == 0)
-            return new LookupResult(LookupKind.NeedPickVar,
-                VarChoices: inLabel.Select(r => r.CmdVar).Distinct().ToList());
-        if (hits.Count > 1)
-            return new LookupResult(LookupKind.Duplicate,
-                DuplicateLines: hits.Select(r => r.SourceLine).ToList());
+        if (hits.Count == 0) return new LookupResult(LookupKind.NeedPickVar, VarChoices: inLabel.Select(r => r.CmdVar).Distinct().ToList());
+        if (hits.Count > 1) return new LookupResult(LookupKind.Duplicate, DuplicateLines: hits.Select(r => r.SourceLine).ToList());
         return new LookupResult(LookupKind.Ok, hits[0]);
     }
     // Khoá PHẢI có Item: thiếu nó thì bấm G cho biến thứ hai ở cùng dòng sẽ xoá sạch biến thứ nhất.
@@ -484,7 +437,6 @@ public static class CopiedText
     public const int MaxLabelLength = 64;
 
     static readonly Regex _bracket = new(@"[「『]([^」』]*)[」』]");
-    static readonly Regex _spaces = new(@"\s+");
 
     public static string Normalize(string? raw)
     {
@@ -498,7 +450,7 @@ public static class CopiedText
             else if (ch is '\r' or '\n' or '\t') sb.Append(' ');
             else sb.Append(ch);
         }
-        return _spaces.Replace(sb.ToString(), " ").Trim();
+        return Mapping.Squash(sb.ToString());
     }
 
     public static string UnquoteExcel(string? raw)
@@ -520,11 +472,7 @@ public static class CopiedText
         var s = Normalize(UnquoteExcel(raw));
         if (s.Length == 0) return null;
 
-        if (ExtractBracket(s) is { } inner)
-        {
-            inner = inner.Trim();
-            return inner.Length == 0 ? null : new Piece(true, inner);
-        }
+        if (ExtractBracket(s) is { } inner) return inner.Length == 0 ? null : new Piece(true, inner);
 
         var label = s.Trim(':', '：', ' ').Trim();
         if (label.Length == 0 || label.Length > MaxLabelLength) return null;

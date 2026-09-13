@@ -5,7 +5,7 @@ namespace SendKeyDemo;
 
 public class MainForm : Form
 {
-    readonly ComboBox _instances = new() { Width = 560, DropDownStyle = ComboBoxStyle.DropDownList };
+    readonly ComboBox _instances = new() { Width = 560, Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
     readonly Button _refresh = new() { Text = "Refresh", AutoSize = true };
     readonly TextBox _file = new() { Dock = DockStyle.Fill };
     readonly Button _browse = new() { Text = "Browse...", AutoSize = true };
@@ -14,14 +14,7 @@ public class MainForm : Form
     readonly Button _goto = new() { Text = "Go To Line", AutoSize = true };
     readonly Button _bp = new() { Text = "Toggle Breakpoint", AutoSize = true };
     readonly Button _addWatch = new() { Text = "Add Watch", AutoSize = true };
-    readonly TextBox _log = new()
-    {
-        Multiline = true,
-        ReadOnly = true,
-        Dock = DockStyle.Fill,
-        ScrollBars = ScrollBars.Vertical,
-        Font = new Font("Consolas", 9f)
-    };
+    readonly TextBox _log = new() { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 9f) };
 
     // --- mapping mode ---
     readonly TextBox _mappingPath = new() { Dock = DockStyle.Fill };
@@ -37,10 +30,14 @@ public class MainForm : Form
     DateTime _mapRowsMtime;
 
     // --- chụp bằng chứng (gộp từ QuickShot) ---
-    readonly Button _startEvidence = new() { Text = "▶  Khởi động" };
-    readonly Button _advancedToggle = new() { Text = "▸  Công cụ khác" };
-    Panel _advanced = new();
-    Label _hotkeyHint = new();
+    readonly Button _startEvidence = new() { Text = "▶  Khởi động", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(0, 9, 0, 9) };
+    readonly Button _advancedToggle = new()
+    {
+        Text = "▸  Công cụ khác", Dock = DockStyle.Top, FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 },
+        TextAlign = ContentAlignment.MiddleLeft, AutoSize = true, TabStop = false, ForeColor = SystemColors.GrayText,
+    };
+    readonly Panel _advanced = new() { Dock = DockStyle.Top, AutoSize = true, Visible = false };
+    readonly Label _hotkeyHint = new() { Dock = DockStyle.Top, AutoSize = true, ForeColor = SystemColors.GrayText, Padding = new Padding(2, 6, 2, 0) };
     readonly NotifyIcon _tray = new() { Visible = true, Text = "SendKey Evidence" };
     HotkeyWindow _hotkeys = new();
     EvidenceSession? _evidence;
@@ -49,24 +46,21 @@ public class MainForm : Form
 
     static FlowLayoutPanel ButtonCell(params Control[] buttons)
     {
-        var cell = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Margin = new Padding(0),
-            WrapContents = false,
-        };
+        var cell = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0), WrapContents = false };
         cell.Controls.AddRange(buttons);
         return cell;
     }
 
-    static Label RowLabel(string text) => new()
+    static Label RowLabel(string text) => new() { Text = text, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 0, 6, 0) };
+
+    static TableLayoutPanel Grid(Padding padding)
     {
-        Text = text,
-        AutoSize = true,
-        Anchor = AnchorStyles.Left,
-        Margin = new Padding(3, 0, 6, 0),
-    };
+        var grid = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 3, AutoSize = true, Padding = padding };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        return grid;
+    }
 
     public MainForm()
     {
@@ -74,70 +68,24 @@ public class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
 
         // ---------- 1. Khối chuẩn bị: 2 thứ duy nhất cần trước khi chụp ----------
-        _instances.Dock = DockStyle.Fill;
-
-        var setup = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            ColumnCount = 3,
-            RowCount = 2,
-            AutoSize = true,
-            Padding = new Padding(12, 12, 12, 4),
-        };
-        setup.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        setup.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        setup.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        var refreshCell = ButtonCell(_refresh);
-        var mappingBtnCell = ButtonCell(_mappingBrowse, _mappingOpen, _checkMapping);
-
+        var setup = Grid(new Padding(12, 12, 12, 4));
+        setup.RowCount = 2;
         setup.Controls.Add(RowLabel("Visual Studio"), 0, 0);
         setup.Controls.Add(_instances, 1, 0);
-        setup.Controls.Add(refreshCell, 2, 0);
+        setup.Controls.Add(ButtonCell(_refresh), 2, 0);
         setup.Controls.Add(RowLabel("mapping.csv"), 0, 1);
         setup.Controls.Add(_mappingPath, 1, 1);
-        setup.Controls.Add(mappingBtnCell, 2, 1);
+        setup.Controls.Add(ButtonCell(_mappingBrowse, _mappingOpen, _checkMapping), 2, 1);
 
         // ---------- 2. Hành động chính: một nút ----------
         _startEvidence.Font = new Font(Font.FontFamily, 10.5f, FontStyle.Bold);
-        _startEvidence.Dock = DockStyle.Top;
-        _startEvidence.AutoSize = true;
-        _startEvidence.Padding = new Padding(0, 9, 0, 9);
-
-        var hotkeyHint = new Label
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            ForeColor = SystemColors.GrayText,
-            Padding = new Padding(2, 6, 2, 0),
-        };
-        _hotkeyHint = hotkeyHint;
-
         var primary = new Panel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(12, 4, 12, 8) };
-        primary.Controls.Add(hotkeyHint);
+        primary.Controls.Add(_hotkeyHint);
         primary.Controls.Add(_startEvidence);
 
         // ---------- 3. Công cụ khác: thu gọn, mặc định ẩn ----------
-        _advancedToggle.Dock = DockStyle.Top;
-        _advancedToggle.FlatStyle = FlatStyle.Flat;
-        _advancedToggle.FlatAppearance.BorderSize = 0;
-        _advancedToggle.TextAlign = ContentAlignment.MiddleLeft;
-        _advancedToggle.AutoSize = true;
-        _advancedToggle.TabStop = false;
-        _advancedToggle.ForeColor = SystemColors.GrayText;
         _advancedToggle.Click += (_, _) => ToggleAdvanced();
-
-        var adv = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            ColumnCount = 3,
-            AutoSize = true,
-            Padding = new Padding(12, 0, 12, 8),
-        };
-        adv.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        adv.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        adv.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
+        var adv = Grid(new Padding(12, 0, 12, 8));
         var vsBtns = ButtonCell(_goto, _bp, _clearBpFile, _addWatch, _copyWatch);
 
         adv.Controls.Add(RowLabel("File"), 0, 0);
@@ -151,7 +99,6 @@ public class MainForm : Form
         adv.Controls.Add(vsBtns, 1, 3);
         adv.SetColumnSpan(vsBtns, 2);   // hàng nút dài: cho lấn sang cột Browse, không bị cắt
 
-        _advanced = new Panel { Dock = DockStyle.Top, AutoSize = true, Visible = false };
         _advanced.Controls.Add(adv);
 
         // ---------- 4. Log + chân cửa sổ ----------
@@ -174,11 +121,7 @@ public class MainForm : Form
         Controls.Add(setup);
 
         _refresh.Click += (_, _) => LoadInstances();
-        _browse.Click += (_, _) =>
-        {
-            using var d = new OpenFileDialog { Filter = "C# files (*.cs)|*.cs|All files (*.*)|*.*" };
-            if (d.ShowDialog(this) == DialogResult.OK) _file.Text = d.FileName;
-        };
+        _browse.Click += (_, _) => PickFile(_file, "C# files (*.cs)|*.cs|All files (*.*)|*.*");
         _goto.Click += (_, _) => Run("Go To Line", dte => VsAutomation.GoToLine(dte, _file.Text, (int)_line.Value));
         _bp.Click += (_, _) => Run("Toggle Breakpoint", dte => VsAutomation.ToggleBreakpoint(dte, _file.Text, (int)_line.Value));
         _clearBpFile.Click += (_, _) => Run("Xóa breakpoint", dte => VsAutomation.ClearBreakpointsInFile(dte, _file.Text));
@@ -211,9 +154,9 @@ public class MainForm : Form
             _evidence.Bar.OpenConfigRequested += ShowConfigWindow;
 
             BuildTray();
-            var hotkeyProblem = RegisterHotkeys();
-            if (hotkeyProblem != null) Log("Hotkey: " + hotkeyProblem);
-            RefreshHotkeyHint();
+            RegisterHotkeys();
+            _hotkeyHint.Text = $"Trong đợt:   {_settings.DefineRegionHotkey} khoanh vùng (1 lần)   ·   " +
+                $"{_settings.GotoCurrentHotkey} đặt breakpoint   ·   {_settings.CaptureRegionHotkey} chụp   ·   {_settings.ClearBreakpointsHotkey} xóa breakpoint";
 
             VsAutomation.OleMessageFilter.Register();
             LoadInstances();
@@ -224,12 +167,13 @@ public class MainForm : Form
     // ---- EvidenceSession (thanh chụp) gọi thẳng vào các hàm internal của cửa sổ này ----
 
     internal DTE? CurrentDte() => (_instances.SelectedItem as VsInstance)?.Dte;
+    string CurrentClassPath() => CurrentDte() is { } dte ? VsAutomation.CurrentClassFile(dte) ?? "" : "";
     internal Rectangle? SavedRegion => _savedRegion;
 
     internal string? AddMapping(string cmdLabel, string cmdVar, string csLabel, string csVar)
     {
         var mappingCsv = _mappingPath.Text.Trim();
-        if (mappingCsv.Length == 0 || !File.Exists(mappingCsv)) return "Chưa trỏ mapping.csv ở cửa sổ cấu hình.";
+        if (!File.Exists(mappingCsv)) return "Chưa trỏ mapping.csv ở cửa sổ cấu hình.";
 
         var cmdL = Mapping.CleanLabel(cmdLabel);
         var cmdV = cmdVar.Trim();
@@ -238,22 +182,19 @@ public class MainForm : Form
         if (cmdL.Length == 0) return "cmdLabel đang trống.";
         if (csL.Length == 0 || (cmdV.Length > 0 && csV.Length == 0)) return "csharpLabel / csharpVar không được để trống.";   // ca goto: chỉ cần label
 
-        var csPath = CurrentDte() is { } dte ? VsAutomation.CurrentClassFile(dte) ?? "" : "";
-        if (csPath.Length == 0 || !File.Exists(csPath))
+        var csPath = CurrentClassPath();
+        if (!File.Exists(csPath))
             return "Chưa mở file .cs nào trong VS — mở file chứa nhãn rồi thử lại.";
 
         var ll = Mapping.FindLabelLine(csPath, csL, csV);
-        switch (ll.Kind)
-        {
-            case LabelLineKind.NotFound:
-                return $"Không thấy \"{csL}:\" trong {Path.GetFileName(csPath)}.";
-            case LabelLineKind.Multiple:
-                return $"\"{csL}:\" xuất hiện ở dòng {string.Join(", ", ll.MatchLines!)} — sửa code hoặc dùng csharpFile.";
-            case LabelLineKind.NoExecutableLine:
-                return $"Sau \"{csL}:\" không còn dòng thực thi.";
-            case LabelLineKind.AnchorNotFound:
-                return $"Không thấy biểu thức \"{csV}\" sau \"{csL}:\".";
-        }
+        if (ll.Kind != LabelLineKind.Ok)
+            return ll.Kind switch
+            {
+                LabelLineKind.NotFound => $"Không thấy \"{csL}:\" trong {Path.GetFileName(csPath)}.",
+                LabelLineKind.Multiple => $"\"{csL}:\" xuất hiện ở dòng {string.Join(", ", ll.MatchLines!)} — sửa code hoặc dùng csharpFile.",
+                LabelLineKind.NoExecutableLine => $"Sau \"{csL}:\" không còn dòng thực thi.",
+                _ => $"Không thấy biểu thức \"{csV}\" sau \"{csL}:\".",
+            };
 
         try
         {
@@ -262,14 +203,8 @@ public class MainForm : Form
             Log($"ĐÃ THÊM mapping: {cmdL} / {cmdV} → {csL} / {csV} — kiểm tra lại bản dịch csharpVar.");
             return null;
         }
-        catch (IOException)
-        {
-            return "Không ghi được mapping.csv (đang mở trong Excel?) — đóng Excel rồi Enter lại.";
-        }
-        catch (Exception ex)
-        {
-            return "Lỗi ghi mapping.csv: " + ex.Message;
-        }
+        catch (IOException) { return "Không ghi được mapping.csv (đang mở trong Excel?) — đóng Excel rồi Enter lại."; }
+        catch (Exception ex) { return "Lỗi ghi mapping.csv: " + ex.Message; }
     }
 
     void SaveSettings()
@@ -283,33 +218,23 @@ public class MainForm : Form
     void OpenInEditor(string path)
     {
         path = path.Trim();
-        if (path.Length == 0 || !File.Exists(path)) { Log($"Mở file: không thấy {path}"); return; }
-        try
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            Log("Mở file: lỗi — " + ex.Message);
-        }
+        if (!File.Exists(path)) { Log($"Mở file: không thấy {path}"); return; }
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true }); }
+        catch (Exception ex) { Log("Mở file: lỗi — " + ex.Message); }
     }
 
     void PickFile(TextBox target, string filter)
     {
         using var d = new OpenFileDialog { Filter = filter };
-        try
-        {
-            var dir = Path.GetDirectoryName(Path.GetFullPath(target.Text));
-            if (Directory.Exists(dir)) d.InitialDirectory = dir;
-        }
-        catch { /* path rỗng / không hợp lệ — bỏ qua */ }
+        var dir = Safe.Try<string?>(() => Path.GetDirectoryName(Path.GetFullPath(target.Text)), null);   // path rỗng / không hợp lệ thì bỏ qua
+        if (Directory.Exists(dir)) d.InitialDirectory = dir;
         if (d.ShowDialog(this) == DialogResult.OK) target.Text = d.FileName;
     }
 
     internal List<MapRow>? GetMapRows()
     {
         var path = _mappingPath.Text.Trim();
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (!File.Exists(path))
         {
             Log($"Không thấy mapping.csv: {path}");
             return null;
@@ -325,31 +250,16 @@ public class MainForm : Form
             Log($"Đã nạp mapping.csv: {_mapRows.Count} dòng.");
             return _mapRows;
         }
-        catch (MappingFormatException ex)
-        {
-            Log(ex.Message);
-            return null;
-        }
-        catch (Exception ex)
-        {
-            Log("Lỗi đọc mapping.csv — " + ex.Message);
-            return null;
-        }
+        catch (MappingFormatException ex) { Log(ex.Message); return null; }
+        catch (Exception ex) { Log("Lỗi đọc mapping.csv — " + ex.Message); return null; }
     }
 
     void CopyWatch()
     {
         var t = _watch.Text.Trim();
         if (t.Length == 0) { Log("Copy Watch: ô Watch đang trống."); return; }
-        try
-        {
-            Clipboard.SetText(t);
-            Log($"Copy Watch: đã copy \"{t}\" — dán (Ctrl+V) vào cửa sổ Watch của VS.");
-        }
-        catch (Exception ex)
-        {
-            Log("Copy Watch: lỗi clipboard — " + ex.Message);
-        }
+        try { Clipboard.SetText(t); Log($"Copy Watch: đã copy \"{t}\" — dán (Ctrl+V) vào cửa sổ Watch của VS."); }
+        catch (Exception ex) { Log("Copy Watch: lỗi clipboard — " + ex.Message); }
     }
 
     void KiemTraMapping()
@@ -373,46 +283,28 @@ public class MainForm : Form
         var tail = res.Unchecked > 0
             ? $", {res.Unchecked} chưa kiểm được (nhãn không có trong file đang mở trong VS)"
             : "";
-        if (res.Problems.Count == 0)
-        {
-            Log($"Kiểm tra mapping.csv: {rows.Count} dòng — {res.Ok} OK, 0 lỗi{tail}.");
-            return;
-        }
-        Log($"Kiểm tra mapping.csv: {rows.Count} dòng — {res.Ok} OK, {res.Problems.Count} lỗi{tail}:");
+        Log($"Kiểm tra mapping.csv: {rows.Count} dòng — {res.Ok} OK, {res.Problems.Count} lỗi{tail}{(res.Problems.Count == 0 ? "." : ":")}");
         foreach (var p in res.Problems) Log("  - " + p);
     }
 
     internal string EffectiveCsPath(MapRow row)
     {
         var f = row.CsharpFile.Trim();
-        if (f.Length == 0) return CurrentDte() is { } dte ? VsAutomation.CurrentClassFile(dte) ?? "" : "";
+        if (f.Length == 0) return CurrentClassPath();
         if (Path.IsPathRooted(f)) return f;
         var baseDir = Path.GetDirectoryName(_mappingPath.Text.Trim()) ?? "";
-        try { return Path.GetFullPath(Path.Combine(baseDir, f)); }
-        catch { return f; }
+        return Safe.Try(() => Path.GetFullPath(Path.Combine(baseDir, f)), f);
     }
 
     void LoadInstances()
     {
         _instances.Items.Clear();
-        try
-        {
-            foreach (var vs in VsAutomation.FindVisualStudios())
-                _instances.Items.Add(vs);
-        }
-        catch (Exception ex)
-        {
-            Log("LỖI khi quét VS: " + ex.Message);
-        }
+        try { foreach (var vs in VsAutomation.FindVisualStudios()) _instances.Items.Add(vs); }
+        catch (Exception ex) { Log("LỖI khi quét VS: " + ex.Message); }
 
         var any = _instances.Items.Count > 0;
-        if (any)
-            _instances.SelectedIndex = 0;
-        else
-        {
-            _instances.Items.Add("(không có instance VS đang chạy)");
-            _instances.SelectedIndex = 0;
-        }
+        if (!any) _instances.Items.Add("(không có instance VS đang chạy)");
+        _instances.SelectedIndex = 0;
 
         _goto.Enabled = _bp.Enabled = _clearBpFile.Enabled = _addWatch.Enabled = any;
         Log(any ? $"Tìm thấy {_instances.Items.Count} instance VS." : "Không tìm thấy VS nào đang chạy.");
@@ -420,30 +312,17 @@ public class MainForm : Form
 
     void Run(string label, Func<DTE, string> action)
     {
-        if (_instances.SelectedItem is not VsInstance vs)
-        {
-            Log(label + ": chưa chọn instance.");
-            return;
-        }
-        try
-        {
-            Log($"{label}: {action(vs.Dte)}");
-        }
+        if (_instances.SelectedItem is not VsInstance vs) { Log(label + ": chưa chọn instance."); return; }
+        try { Log($"{label}: {action(vs.Dte)}"); }
         catch (Exception ex) when (ex is InvalidComObjectException ||
             (ex is COMException ce && (uint)ce.HResult is 0x800706BA or 0x80010108 or 0x800401FD))
         {
             Log($"{label}: instance đã đóng — bấm Refresh.");
         }
-        catch (Exception ex)
-        {
-            Log($"{label} LỖI: {ex.Message}");
-        }
+        catch (Exception ex) { Log($"{label} LỖI: {ex.Message}"); }
     }
 
     // ==================== chụp bằng chứng: tray + hotkey ====================
-
-    // Dùng luôn icon đã nhúng trong exe (ApplicationIcon = app.ico) — khỏi giữ thêm file icon thứ hai.
-    static Icon LoadAppIcon() => Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
 
     void ToggleAdvanced()
     {
@@ -453,28 +332,18 @@ public class MainForm : Form
         ActiveControl = _advanced.Visible ? _file : null;
     }
 
-    void RefreshHotkeyHint()
-        => _hotkeyHint.Text =
-            $"Trong đợt:   {_settings.DefineRegionHotkey} khoanh vùng (1 lần)   ·   " +
-            $"{_settings.GotoCurrentHotkey} đặt breakpoint   ·   {_settings.CaptureRegionHotkey} chụp   ·   " +
-            $"{_settings.ClearBreakpointsHotkey} xóa breakpoint";
-
     void StartClipboardMode()
     {
         if (_evidence == null) return;
 
-        if (_mappingPath.Text.Trim() is var m && (m.Length == 0 || !File.Exists(m)))
+        if (!File.Exists(_mappingPath.Text.Trim()))
         {
             MessageBox.Show(this, "Chưa trỏ mapping.csv ở trên.", "Thiếu đường dẫn",
                 MessageBoxButtons.OK, _settings.MsgIcon(MessageBoxIcon.Warning));
             return;
         }
         _evidence.Start();
-        AfterEvidenceStart();
-    }
 
-    void AfterEvidenceStart()
-    {
         if (_savedRegion == null)
             MessageBox.Show(this,
                 $"Sắp cửa sổ VS sao cho thấy tab tên file, dòng code và cửa sổ Watch, rồi bấm {_settings.DefineRegionHotkey} " +
@@ -486,7 +355,8 @@ public class MainForm : Form
 
     void BuildTray()
     {
-        _tray.Icon = LoadAppIcon();
+        // Dùng luôn icon đã nhúng trong exe (ApplicationIcon = app.ico) — khỏi giữ thêm file icon thứ hai.
+        _tray.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
         Icon = _tray.Icon;
 
         var menu = new ContextMenuStrip();
@@ -509,7 +379,7 @@ public class MainForm : Form
         _evidence?.Bar.AttachMenu(menu);
     }
 
-    string? RegisterHotkeys()
+    void RegisterHotkeys()
     {
         _hotkeys.Dispose();
         _hotkeys = new HotkeyWindow();
@@ -526,28 +396,23 @@ public class MainForm : Form
         RegisterOne(_settings.GotoCurrentHotkey, defaults.GotoCurrentHotkey, "Chạy cặp đang chọn",
             () => _evidence?.Run(), failed);
 
-        return failed.Count > 0 ? "không đăng ký được: " + string.Join("; ", failed) : null;
+        if (failed.Count > 0) Log("Hotkey: không đăng ký được: " + string.Join("; ", failed));
     }
 
     void ClearBreakpointsHotkey()
     {
         if (_evidence is { Active: true } session) { session.ClearBreakpoints(); return; }
-
-        if (CurrentDte() is not { } dte) { Log("Xóa breakpoint: chưa chọn instance VS."); return; }
-        var f = VsAutomation.CurrentClassFile(dte);
-        if (string.IsNullOrWhiteSpace(f)) { Log("Xóa breakpoint: chưa mở file .cs nào trong VS."); return; }
-        Log("Xóa breakpoint: " + VsAutomation.ClearBreakpointsInFile(dte, f));
+        Run("Xóa breakpoint", dte => VsAutomation.CurrentClassFile(dte) is { } f && !string.IsNullOrWhiteSpace(f)
+            ? VsAutomation.ClearBreakpointsInFile(dte, f)
+            : "chưa mở file .cs nào trong VS.");
     }
 
     void RegisterOne(string spec, string fallback, string label, Action action, List<string> failed)
     {
-        if (HotkeyParser.TryParse(spec, out var mod, out var key) && _hotkeys.Register(mod, key, action)) return;
-
-        if (spec != fallback &&
-            HotkeyParser.TryParse(fallback, out var fmod, out var fkey) && _hotkeys.Register(fmod, fkey, action))
-            failed.Add($"{label} → dùng mặc định {fallback} vì \"{spec}\" hỏng/bị chiếm");
-        else
-            failed.Add($"{label} ({spec})");
+        if (_hotkeys.Register(spec, action)) return;
+        failed.Add(spec != fallback && _hotkeys.Register(fallback, action)
+            ? $"{label} → dùng mặc định {fallback} vì \"{spec}\" hỏng/bị chiếm"
+            : $"{label} ({spec})");
     }
 
     void DefineRegion()
@@ -566,11 +431,7 @@ public class MainForm : Form
     {
         if (_evidence is { Active: true } session) { session.CaptureCurrent(); return; }
 
-        if (_savedRegion is not { } r)
-        {
-            Log($"Chụp: chưa khoanh vùng — bấm {_settings.DefineRegionHotkey} một lần.");
-            return;
-        }
+        if (_savedRegion is not { } r) { Log($"Chụp: chưa khoanh vùng — bấm {_settings.DefineRegionHotkey} một lần."); return; }
         PlainCapture(r);
     }
 

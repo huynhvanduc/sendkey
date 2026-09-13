@@ -39,13 +39,8 @@ public static class VsAutomation
                 if (rot.GetObject(monikers[0], out var obj) != 0) continue;
                 if (obj is not DTE dte) continue;
 
-                var sln = "(chưa mở solution)";
-                try
-                {
-                    var full = dte.Solution?.FullName;
-                    if (!string.IsNullOrEmpty(full)) sln = Path.GetFileName(full);
-                }
-                catch { /* solution đang load */ }
+                // Solution đang load thì đọc tên sẽ ném.
+                var sln = Safe.Try<string?>(() => dte.Solution?.FullName, null) is { Length: > 0 } full ? Path.GetFileName(full) : "(chưa mở solution)";
 
                 list.Add(new VsInstance(p.Version, p.ProcessId, sln, dte));
             }
@@ -57,9 +52,7 @@ public static class VsAutomation
     public static string GoToLine(DTE dte, string file, int line, bool select = false, bool activate = true)
     {
         if (!File.Exists(file)) return $"file không tồn tại: {file}";
-        var win = dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView);
-        win.Activate();
-        var sel = (TextSelection)win.Document.Selection;
+        var sel = (TextSelection)Open(dte, file).Document.Selection;
         sel.GotoLine(line, select);
         var reached = sel.CurrentLine;
         if (activate) dte.MainWindow.Activate();
@@ -69,16 +62,18 @@ public static class VsAutomation
     }
 
     // Đi thẳng ActiveDocument: DTE.ActiveWindow trả null khi cửa sổ Watch đang active.
-    public static string? ActiveFile(DTE dte)
+    public static string? ActiveFile(DTE dte) => Safe.Try<string?>(() => dte.ActiveDocument?.FullName, null);
+
+    static EnvDTE.Window Open(DTE dte, string file)
     {
-        try { return dte.ActiveDocument?.FullName; }
-        catch { return null; }
+        var win = dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView);
+        win.Activate();
+        return win;
     }
 
     public static bool ShowLabel(DTE dte, string file, int labelLine, int stopLine)
     {
-        var win = dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView);
-        win.Activate();
+        var win = Open(dte, file);
         ((TextSelection)win.Document.Selection).GotoLine(stopLine, false);
         bool visible = true;
         if (labelLine > 0 && win.Object is TextWindow tw)
@@ -98,25 +93,9 @@ public static class VsAutomation
     public static string ToggleBreakpoint(DTE dte, string file, int line)
     {
         if (!File.Exists(file)) return $"file không tồn tại: {file}";
-        foreach (Breakpoint bp in dte.Debugger.Breakpoints)
-        {
-            if (string.Equals(bp.File, file, StringComparison.OrdinalIgnoreCase) && bp.FileLine == line)
-            {
-                bp.Delete();
-                return $"đã xóa breakpoint tại {Path.GetFileName(file)}:{line}";
-            }
-        }
-        try
-        {
-            dte.Debugger.Breakpoints.Add("", file, line);
-        }
-        catch (COMException)
-        {
-            return $"không đặt được breakpoint tại {Path.GetFileName(file)}:{line} — dòng phải là lệnh " +
-                   "thực thi (không phải dòng trống / comment / using / khai báo), và file phải thuộc " +
-                   "solution đang mở trong VS.";
-        }
-        return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
+        if (FindBreakpoint(dte, file, line, _ => true) is not { } bp) return AddBreakpoint(dte, file, line, 1);
+        bp.Delete();
+        return $"đã xóa breakpoint tại {Path.GetFileName(file)}:{line}";
     }
 
     public static string ClearBreakpointsInFile(DTE dte, string file)
@@ -137,30 +116,24 @@ public static class VsAutomation
     public static string EnsureBreakpoint(DTE dte, string file, int line, int column = 0)
     {
         if (!File.Exists(file)) return $"file không tồn tại: {file}";
-        var where = column > 0 ? $"{Path.GetFileName(file)}:{line}:{column}" : $"{Path.GetFileName(file)}:{line}";
-        foreach (Breakpoint bp in dte.Debugger.Breakpoints)
-        {
-            if (string.Equals(bp.File, file, StringComparison.OrdinalIgnoreCase) && bp.FileLine == line &&
-                (column > 0 ? bp.FileColumn == column : bp.FileColumn <= 1))
-                return $"breakpoint đã có tại {where}";
-        }
-        try
-        {
-            dte.Debugger.Breakpoints.Add("", file, line, column > 0 ? column : 1);
-        }
-        catch (COMException)
-        {
-            return $"không đặt được breakpoint tại {Path.GetFileName(file)}:{line} — dòng phải là lệnh " +
-                   "thực thi (không phải dòng trống / comment / khai báo), và file phải thuộc solution đang mở.";
-        }
-        return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
+        if (FindBreakpoint(dte, file, line, bp => column > 0 ? bp.FileColumn == column : bp.FileColumn <= 1) != null)
+            return $"breakpoint đã có tại {Path.GetFileName(file)}:{line}{(column > 0 ? $":{column}" : "")}";
+        return AddBreakpoint(dte, file, line, column > 0 ? column : 1);
     }
 
-    public static string SetOnlyBreakpoint(DTE dte, string file, int line)
+    static Breakpoint? FindBreakpoint(DTE dte, string file, int line, Func<Breakpoint, bool> match)
+        => dte.Debugger.Breakpoints.Cast<Breakpoint>()
+            .FirstOrDefault(bp => string.Equals(bp.File, file, StringComparison.OrdinalIgnoreCase) && bp.FileLine == line && match(bp));
+
+    static string AddBreakpoint(DTE dte, string file, int line, int column)
     {
-        if (!File.Exists(file)) return $"file không tồn tại: {file}";
-        ClearBreakpointsInFile(dte, file);
-        return EnsureBreakpoint(dte, file, line);
+        try { dte.Debugger.Breakpoints.Add("", file, line, column); }
+        catch (COMException)
+        {
+            return $"không đặt được breakpoint tại {Path.GetFileName(file)}:{line} — dòng phải là lệnh thực thi " +
+                   "(không phải dòng trống / comment / khai báo), và file phải thuộc solution đang mở trong VS.";
+        }
+        return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
     }
 
     public static DebugSnapshot ReadDebugState(DTE dte, string csFile, IReadOnlyList<string> exprs)
@@ -174,26 +147,19 @@ public static class VsAutomation
             string hitFile = "";
             int hitLine = 0, hitColumn = 0;
             if (inBreak)
-            {
                 try
                 {
                     var hit = dbg.BreakpointLastHit;
                     if (hit != null) { hitFile = hit.File ?? ""; hitLine = hit.FileLine; hitColumn = hit.FileColumn; }
                 }
                 catch (COMException) { /* dừng không do breakpoint */ }
-            }
 
             int bpInFile = 0;
             try
             {
                 foreach (Breakpoint bp in dbg.Breakpoints)
-                {
-                    try
-                    {
-                        if (string.Equals(bp.File, csFile, StringComparison.OrdinalIgnoreCase)) bpInFile++;
-                    }
+                    try { if (string.Equals(bp.File, csFile, StringComparison.OrdinalIgnoreCase)) bpInFile++; }
                     catch (COMException) { /* breakpoint kiểu hàm — không có File */ }
-                }
             }
             catch (COMException) { /* chưa có collection */ }
 
@@ -239,11 +205,7 @@ public static class VsAutomation
             _events.OnEnterBreakMode += _onBreak;
         }
 
-        public void Dispose()
-        {
-            try { _events.OnEnterBreakMode -= _onBreak; }
-            catch (Exception) { /* VS đã đóng */ }
-        }
+        public void Dispose() => Safe.Try(() => { _events.OnEnterBreakMode -= _onBreak; });   // VS có thể đã đóng
     }
 
     // Watch window kind GUID (EnvDTE.Constants.vsWindowKindWatch)
@@ -255,8 +217,7 @@ public static class VsAutomation
         if (dte.Debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
             return "Chưa ở break mode — cho chương trình chạy và DỪNG lại ở breakpoint, rồi mới Add Watch.";
 
-        var copied = false;
-        try { Clipboard.SetText(expression); copied = true; } catch { /* clipboard đang bận */ }
+        var copied = Safe.Try(() => { Clipboard.SetText(expression); return true; }, false);   // clipboard có thể đang bận
 
         try
         {
@@ -294,31 +255,17 @@ public static class VsAutomation
         return null;
     }
 
-    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
-
     public static void BringToFront(DTE dte)
     {
         var hwnd = new IntPtr(dte.MainWindow.HWnd);
-        if (hwnd != IntPtr.Zero) SetForegroundWindow(hwnd);
+        if (hwnd != IntPtr.Zero) Native.SetForegroundWindow(hwnd);
     }
 
     // ĐỪNG lấy ActiveFile làm mốc khi đang dừng: GoToLine gọi win.Activate() nên mốc trôi sang class khác.
     public static string? CurrentClassFile(DTE dte)
-    {
-        try
-        {
-            if (InBreakMode(dte) && ReadDebugState(dte, "", Array.Empty<string>()).HitFile is { Length: > 0 } hit)
-                return hit;
-        }
-        catch { /* rơi về file đang mở */ }
-        return ActiveFile(dte);
-    }
+        => Safe.Try(() => InBreakMode(dte) ? ReadDebugState(dte, "", Array.Empty<string>()).HitFile : "", "") is { Length: > 0 } hit ? hit : ActiveFile(dte);
 
-    public static bool InBreakMode(DTE dte)
-    {
-        try { return dte.Debugger.CurrentMode == dbgDebugMode.dbgBreakMode; }
-        catch { return false; }
-    }
+    public static bool InBreakMode(DTE dte) => Safe.Try(() => dte.Debugger.CurrentMode == dbgDebugMode.dbgBreakMode, false);
 
     public static List<string>? SetWatch(DTE dte, string file, int fromLine, IReadOnlyList<string> exprs)
     {
@@ -331,9 +278,7 @@ public static class VsAutomation
         {
             try
             {
-                var win = dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView);
-                win.Activate();
-                var sel = (TextSelection)win.Document.Selection;
+                var sel = (TextSelection)Open(dte, file).Document.Selection;
                 int flags = (int)vsFindOptions.vsFindOptionsMatchCase |
                             (Mapping.IsExpression(expr) ? 0 : (int)vsFindOptions.vsFindOptionsMatchWholeWord);
                 sel.MoveToLineAndOffset(Math.Max(1, fromLine), 1);
@@ -349,22 +294,14 @@ public static class VsAutomation
         return missed;
     }
 
-    public static bool ClearWatchAll(DTE dte)
+    public static bool ClearWatchAll(DTE dte) => InBreakMode(dte) && Safe.Try(() =>
     {
-        if (!InBreakMode(dte)) return false;
-        try
-        {
-            dte.ExecuteCommand("Debug.Watch1");
-            return WatchTree(dte) is { } tree && ClearWatch(dte, tree);
-        }
-        catch (Exception) { return false; }
-    }
+        dte.ExecuteCommand("Debug.Watch1");
+        return WatchTree(dte) is { } tree && ClearWatch(dte, tree);
+    }, false);
 
     public static List<string>? ReadWatchNames(DTE dte)
-    {
-        try { return WatchTree(dte) is { } tree ? WatchItems(tree).Select(i => i.Current.Name).ToList() : null; }
-        catch (Exception) { return null; }
-    }
+        => Safe.Try<List<string>?>(() => WatchTree(dte) is { } tree ? WatchItems(tree).Select(i => i.Current.Name).ToList() : null, null);
 
     static UIA.AutomationElement? WatchTree(DTE dte)
     {
@@ -432,25 +369,10 @@ public static class VsAutomation
         [PreserveSig] int MessagePending(IntPtr callee, int tickCount, int pendingType);
     }
 }
-public enum CheckLevel
-{
-    Ok,
-    Confirm,
-    Block,
-}
+public enum CheckLevel { Ok, Confirm, Block }
 
-public record DebugSnapshot(
-    bool Available,
-    bool InBreakMode,
-    string HitFile,
-    int HitLine,
-    int BreakpointsInFile,
-    bool ExprValid,
-    string ExprValue,
-    int ProcessId,
-    string? Error = null,
-    string BadExpr = "",
-    int HitColumn = 0)
+public record DebugSnapshot(bool Available, bool InBreakMode, string HitFile, int HitLine, int BreakpointsInFile,
+    bool ExprValid, string ExprValue, int ProcessId, string? Error = null, string BadExpr = "", int HitColumn = 0)
 {
     public static DebugSnapshot Unavailable(string error) =>
         new(false, false, "", 0, 0, false, "", 0, error);
@@ -488,28 +410,20 @@ public static class CaptureCheck
         return "Watch " + string.Join(" · ", parts) + ".";
     }
 
-    static bool SameFile(string a, string b)
+    public static bool SameFile(string a, string b)
         => !string.IsNullOrEmpty(a) && !string.IsNullOrEmpty(b) &&
            string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
 
-    public static CheckResult Evaluate(
-        DebugSnapshot s,
-        string tcId,
-        string expectedFile,
-        int expectedLine,
-        string watchExpr,
-        LastCapture? previous)
+    public static CheckResult Evaluate(DebugSnapshot s, string tcId, string expectedFile, int expectedLine, string watchExpr, LastCapture? previous)
     {
         if (!s.Available)
             return new CheckResult(CheckLevel.Block, s.Error ?? "Không đọc được trạng thái VS — bấm Refresh chọn lại instance.");
 
         if (!s.InBreakMode)
-            return new CheckResult(CheckLevel.Block,
-                "Chưa dừng ở breakpoint — đợi chương trình chạy tới breakpoint rồi mới chụp.");
+            return new CheckResult(CheckLevel.Block, "Chưa dừng ở breakpoint — đợi chương trình chạy tới breakpoint rồi mới chụp.");
 
         if (string.IsNullOrEmpty(s.HitFile) || s.HitLine <= 0)
-            return new CheckResult(CheckLevel.Block,
-                "Dừng nhưng không phải do breakpoint (Break All / exception?) — không chụp.");
+            return new CheckResult(CheckLevel.Block, "Dừng nhưng không phải do breakpoint (Break All / exception?) — không chụp.");
 
         if (!SameFile(s.HitFile, expectedFile) || s.HitLine != expectedLine)
             return new CheckResult(CheckLevel.Block,
@@ -529,11 +443,8 @@ public static class CaptureCheck
             !string.Equals(prev.TcId, tcId, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(prev.Expr, watchExpr, StringComparison.OrdinalIgnoreCase) &&
             ValuesMatch(prev.Value, s.ExprValue))
-        {
             return new CheckResult(CheckLevel.Confirm,
-                $"{watchExpr} = {s.ExprValue} y hệt lần chụp {prev.TcId}, cùng phiên debug — " +
-                "biến đã được gán lại chưa? Vẫn chụp?");
-        }
+                $"{watchExpr} = {s.ExprValue} y hệt lần chụp {prev.TcId}, cùng phiên debug — biến đã được gán lại chưa? Vẫn chụp?");
 
         var valuePart = hasExpr ? $" · {watchExpr} = {s.ExprValue}" : "";
 

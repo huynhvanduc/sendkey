@@ -127,15 +127,6 @@ public class MappingTests
     }
 
     [Fact]
-    public void Resolve_empty_var_is_label_only_mode()
-    {
-        var r = Mapping.Resolve(SampleRows(), "VALIDATE_DATE", null);
-        Assert.Equal(LookupKind.Ok, r.Kind);
-        Assert.Equal("VALIDATE_DATE", r.Row!.CsharpLabel);
-        Assert.Null(r.Warning);
-    }
-
-    [Fact]
     public void Resolve_duplicate_pair_reports_source_lines()
     {
         var rows = new List<MapRow>
@@ -146,19 +137,6 @@ public class MappingTests
         var r = Mapping.Resolve(rows, "L", "%x%");
         Assert.Equal(LookupKind.Duplicate, r.Kind);
         Assert.Equal(new[] { 2, 7 }, r.DuplicateLines);
-    }
-
-    [Fact]
-    public void Resolve_label_only_warns_when_csharp_label_differs()
-    {
-        var rows = new List<MapRow>
-        {
-            new("L", "%A%", "LabelA", "a", 2),
-            new("L", "%B%", "LabelB", "b", 3),
-        };
-        var r = Mapping.Resolve(rows, "L", null);
-        Assert.Equal(LookupKind.Ok, r.Kind);
-        Assert.NotNull(r.Warning);
     }
 
     [Fact]

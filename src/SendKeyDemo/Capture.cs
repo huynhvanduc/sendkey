@@ -7,37 +7,28 @@ namespace SendKeyDemo;
 
 public static class ScreenCapture
 {
-    public record Result(bool Ok, string Message, string FilePath);
-
-    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hWnd);
-    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
+    public record Result(bool Ok, string Message);
 
     const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct RECT { public int Left, Top, Right, Bottom; }
 
     public static Rectangle CursorScreenBounds() => Screen.FromPoint(Cursor.Position).Bounds;
 
     public static Rectangle? ActiveWindowBounds()
     {
-        IntPtr hWnd = GetForegroundWindow();
-        if (hWnd == IntPtr.Zero || IsIconic(hWnd)) return null;
+        IntPtr hWnd = Native.GetForegroundWindow();
+        if (hWnd == IntPtr.Zero || Native.IsIconic(hWnd)) return null;
 
-        bool got = DwmGetWindowAttribute(hWnd, DWMWA_EXTENDED_FRAME_BOUNDS, out var r, Marshal.SizeOf<RECT>()) == 0
-                   || GetWindowRect(hWnd, out r);
+        bool got = Native.DwmGetWindowAttribute(hWnd, DWMWA_EXTENDED_FRAME_BOUNDS, out var r, Marshal.SizeOf<Native.RECT>()) == 0
+                   || Native.GetWindowRect(hWnd, out r);
         if (!got) return null;
 
         var rect = Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom);
         return rect.Width > 0 && rect.Height > 0 ? rect : null;
     }
 
-    public static Result Grab(Rectangle region, AppSettings settings, bool saveFile, bool showFlyout = true)
+    public static Result Grab(Rectangle region, AppSettings settings, bool saveFile)
     {
-        if (region.Width <= 0 || region.Height <= 0)
-            return new Result(false, "vùng chụp không hợp lệ", "");
+        if (region.Width <= 0 || region.Height <= 0) return new Result(false, "vùng chụp không hợp lệ");
 
         try
         {
@@ -48,25 +39,13 @@ public static class ScreenCapture
             using (var forClipboard = BuildClipboardImage(bmp, settings))
                 SetClipboardImage(forClipboard);
 
-            string file = "";
-            if (saveFile)
-            {
-                file = Path.Combine(settings.ResolvedSaveFolder,
-                    $"QuickShot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png");
-                bmp.Save(file, ImageFormat.Png);
-            }
+            var file = saveFile ? Path.Combine(settings.ResolvedSaveFolder, $"QuickShot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png") : "";
+            if (saveFile) bmp.Save(file, ImageFormat.Png);
 
-            if (showFlyout)
-                new CaptureFlyoutForm(new Bitmap(bmp), region, file).Show();
-
-            return new Result(true,
-                saveFile ? $"đã chụp → {Path.GetFileName(file)}" : "đã chụp vào clipboard",
-                file);
+            new CaptureFlyoutForm(new Bitmap(bmp), region, file).Show();
+            return new Result(true, saveFile ? $"đã chụp → {Path.GetFileName(file)}" : "đã chụp vào clipboard");
         }
-        catch (Exception ex)
-        {
-            return new Result(false, "lỗi chụp: " + ex.Message, "");
-        }
+        catch (Exception ex) { return new Result(false, "lỗi chụp: " + ex.Message); }
     }
 
     public static Result GrabClean(Rectangle region, AppSettings settings, Form? hide)
@@ -129,7 +108,7 @@ public static class ScreenCapture
 
 // ==================== RegionSelector ====================
 
-public sealed class RegionSelector : Form
+public sealed class RegionSelector : OverlayForm
 {
     private const int FadeInMs = 120;
     private const float TargetOverlayOpacity = 0.42f;
@@ -150,13 +129,7 @@ public sealed class RegionSelector : Form
     {
         _fixedSize = fixedSize;
         // Phủ hết mọi màn hình, kể cả tọa độ âm (màn bên trái màn chính)
-        var vs = SystemInformation.VirtualScreen;
-        StartPosition = FormStartPosition.Manual;
-        Bounds = vs;
-
-        FormBorderStyle = FormBorderStyle.None;
-        ShowInTaskbar = false;
-        TopMost = true;
+        Bounds = SystemInformation.VirtualScreen;
         Opacity = 0.0;
         BackColor = Color.Black;
         Cursor = fixedSize == null ? Cursors.Cross : Cursors.SizeAll;
@@ -240,17 +213,8 @@ public sealed class RegionSelector : Form
     {
         if (!_dragging) return;
         _dragging = false;
-
-        if (_selection.Width < 2 || _selection.Height < 2)
-        {
-            Result = null;   // click hụt, coi như hủy
-        }
-        else
-        {
-            // Đổi từ tọa độ client (trong form) sang tọa độ màn hình thật
-            var screenPt = PointToScreen(_selection.Location);
-            Result = new Rectangle(screenPt, _selection.Size);
-        }
+        // Click hụt coi như huỷ; còn lại đổi toạ độ client sang toạ độ màn hình thật.
+        Result = _selection.Width < 2 || _selection.Height < 2 ? null : new Rectangle(PointToScreen(_selection.Location), _selection.Size);
         Close();
     }
 
@@ -297,21 +261,11 @@ public sealed class RegionSelector : Form
         _vignetteBrush?.Dispose();
     }
 
-    // Ẩn khỏi Alt+Tab
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            const int WS_EX_TOOLWINDOW = 0x80;
-            var cp = base.CreateParams;
-            cp.ExStyle |= WS_EX_TOOLWINDOW;
-            return cp;
-        }
-    }
+    protected override int ExtraExStyle => 0x80;   // WS_EX_TOOLWINDOW: ẩn khỏi Alt+Tab
 }
 
 
-public sealed class CaptureFlyoutForm : Form
+public sealed class CaptureFlyoutForm : OverlayForm
 {
     private const int HighlightFadeMs = 150;
     private const int HighlightMs = 350;
@@ -353,10 +307,6 @@ public sealed class CaptureFlyoutForm : Form
         _restBounds = ComputeRestBounds(capturedBounds);
         _hoverBounds = ComputeHoverBounds(_restBounds);
 
-        FormBorderStyle = FormBorderStyle.None;
-        ShowInTaskbar = false;
-        TopMost = true;
-        StartPosition = FormStartPosition.Manual;
         Bounds = _startBounds;
         Cursor = Cursors.Hand;
 
@@ -372,17 +322,9 @@ public sealed class CaptureFlyoutForm : Form
 
     private static Rectangle ComputeRestBounds(Rectangle capturedBounds)
     {
-        var screen = Screen.FromRectangle(capturedBounds);
-        double scale = Math.Min(
-            (double)ThumbMaxW / capturedBounds.Width,
-            (double)ThumbMaxH / capturedBounds.Height);
-        scale = Math.Min(scale, 1.0);
-
-        int w = Math.Max(1, (int)(capturedBounds.Width * scale));
-        int h = Math.Max(1, (int)(capturedBounds.Height * scale));
-
-        var wa = screen.WorkingArea;
-        return new Rectangle(wa.Right - w - EdgeMargin, wa.Bottom - h - EdgeMargin, w, h);
+        var size = FitSize(capturedBounds.Size, ThumbMaxW, ThumbMaxH);
+        var wa = Screen.FromRectangle(capturedBounds).WorkingArea;
+        return new Rectangle(wa.Right - size.Width - EdgeMargin, wa.Bottom - size.Height - EdgeMargin, size.Width, size.Height);
     }
 
     private static Rectangle ComputeHoverBounds(Rectangle rest)
@@ -392,18 +334,20 @@ public sealed class CaptureFlyoutForm : Form
         return new Rectangle(rest.Right - w, rest.Bottom - h, w, h);
     }
 
+    private static Size FitSize(Size source, int maxW, int maxH)
+    {
+        double scale = Math.Min(1.0, Math.Min((double)maxW / source.Width, (double)maxH / source.Height));
+        return new Size(Math.Max(1, (int)(source.Width * scale)), Math.Max(1, (int)(source.Height * scale)));
+    }
+
     private static Bitmap BuildScaled(Bitmap source, int maxW, int maxH)
     {
-        double scale = Math.Min((double)maxW / source.Width, (double)maxH / source.Height);
-        scale = Math.Min(scale, 1.0);
-        int w = Math.Max(1, (int)(source.Width * scale));
-        int h = Math.Max(1, (int)(source.Height * scale));
-
-        var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+        var size = FitSize(source.Size, maxW, maxH);
+        var bmp = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb);
         using var g = Graphics.FromImage(bmp);
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        g.DrawImage(source, new Rectangle(0, 0, w, h));
+        g.DrawImage(source, new Rectangle(Point.Empty, size));
         return bmp;
     }
 
@@ -421,57 +365,29 @@ public sealed class CaptureFlyoutForm : Form
         long delta = now - _lastFrameMs;
         _lastFrameMs = now;
 
+        if (_phase is Phase.Hold or Phase.Fade) UpdateHoverT(delta);
         switch (_phase)
         {
-            case Phase.Highlight:
-                if (now >= HighlightMs)
-                {
-                    _phase = Phase.Fly;
-                    _stopwatch.Restart();
-                    _lastFrameMs = 0;
-                }
+            case Phase.Highlight when now >= HighlightMs: EnterPhase(Phase.Fly); break;
+            case Phase.Fly when now >= FlyMs: EnterPhase(Phase.Hold); break;
+            case Phase.Hold when !_isHovered:
+                _holdRemainingMs -= delta;
+                if (_holdRemainingMs <= 0) EnterPhase(Phase.Fade);
                 break;
-
-            case Phase.Fly:
-                if (now >= FlyMs)
-                {
-                    _phase = Phase.Hold;
-                    _stopwatch.Restart();
-                    _lastFrameMs = 0;
-                    _holdRemainingMs = HoldMs;
-                }
-                break;
-
-            case Phase.Hold:
-                UpdateHoverT(delta);
-                if (!_isHovered) _holdRemainingMs -= delta;
-                if (_holdRemainingMs <= 0 && !_isHovered)
-                {
-                    _phase = Phase.Fade;
-                    _stopwatch.Restart();
-                    _lastFrameMs = 0;
-                }
-                break;
-
-            case Phase.Fade:
-                UpdateHoverT(delta);
-                if (_isHovered)
-                {
-                    // User rê chuột vào đúng lúc đang mờ: quay lại Hold, không để biến mất giữa chừng.
-                    _phase = Phase.Hold;
-                    _stopwatch.Restart();
-                    _lastFrameMs = 0;
-                    _holdRemainingMs = HoldMs;
-                }
-                else if (now >= FadeMs)
-                {
-                    CloseAndDispose();
-                    return;
-                }
-                break;
+            // User rê chuột vào đúng lúc đang mờ: quay lại Hold, không để biến mất giữa chừng.
+            case Phase.Fade when _isHovered: EnterPhase(Phase.Hold); break;
+            case Phase.Fade when now >= FadeMs: CloseAndDispose(); return;
         }
 
         RenderFrame();
+    }
+
+    private void EnterPhase(Phase phase)
+    {
+        _phase = phase;
+        _stopwatch.Restart();
+        _lastFrameMs = 0;
+        _holdRemainingMs = HoldMs;
     }
 
     private void UpdateHoverT(long delta)
@@ -489,77 +405,46 @@ public sealed class CaptureFlyoutForm : Form
     {
         if (_original == null || _smallSource == null) return;
 
-        Rectangle bounds;
-        Bitmap frame;
-        double opacity = 1.0;
-
-        switch (_phase)
+        long ms = _stopwatch.ElapsedMilliseconds;
+        var bounds = _phase switch
         {
-            case Phase.Highlight:
+            Phase.Highlight => _startBounds,
+            Phase.Fly => Lerp(_startBounds, _restBounds, Theme.EaseOutCubic(Math.Min(1.0, ms / (double)FlyMs))),
+            Phase.Hold => Lerp(_restBounds, _hoverBounds, Theme.EaseOutQuad(_hoverT)),
+            _ => _restBounds,
+        };
+
+        using var frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(frame))
+        {
+            if (_phase == Phase.Highlight)
+            {
+                g.DrawImageUnscaled(_original, 0, 0);
+                DrawHighlightBorder(g, bounds, (float)Math.Min(1.0, ms / (double)HighlightFadeMs));
+            }
+            else
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                bool hover = _phase == Phase.Hold && _hoverT > 0.01;
+                DrawClippedContent(g, hover && _hoverSource != null ? _hoverSource : _smallSource, bounds);
+
+                // Fly cross-fade 100ms: viền highlight mờ dần, viền glow của thumbnail hiện dần thay thế.
+                float glow = _phase switch
                 {
-                    bounds = _startBounds;
-                    frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
-                    using var g = Graphics.FromImage(frame);
-                    g.DrawImageUnscaled(_original, 0, 0);
-                    double t = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / (double)HighlightFadeMs);
-                    DrawHighlightBorder(g, bounds, (float)t);
-                    break;
-                }
-
-            case Phase.Fly:
-                {
-                    double t = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / (double)FlyMs);
-                    double eased = Theme.EaseOutCubic(t);
-                    bounds = Lerp(_startBounds, _restBounds, eased);
-                    frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
-                    using var g = Graphics.FromImage(frame);
-                    g.SmoothingMode = SmoothingMode.AntiAlias;
-                    g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                    DrawClippedContent(g, _smallSource, bounds);
-
-                    // Cross-fade 100ms: viền highlight mờ dần, viền glow của thumbnail hiện dần thay thế.
-                    double crossT = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / 100.0);
-                    if (crossT < 1.0)
-                        DrawHighlightBorder(g, new Rectangle(0, 0, bounds.Width, bounds.Height), (float)(1 - crossT));
-                    Theme.DrawGlowBorder(g, new RectangleF(1, 1, bounds.Width - 2, bounds.Height - 2), CornerRadius, (float)crossT);
-                    break;
-                }
-
-            case Phase.Hold:
-                {
-                    bounds = Lerp(_restBounds, _hoverBounds, Theme.EaseOutQuad(_hoverT));
-                    var source = _hoverT > 0.01 && _hoverSource != null ? _hoverSource : _smallSource;
-                    frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
-                    using var g = Graphics.FromImage(frame);
-                    g.SmoothingMode = SmoothingMode.AntiAlias;
-                    g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                    DrawClippedContent(g, source, bounds);
-
-                    double pulse = (Math.Sin(_stopwatch.ElapsedMilliseconds / (double)PulsePeriodMs * 2 * Math.PI) + 1) / 2;
-                    float glowIntensity = _hoverT > 0.01 ? 1.0f : (float)(0.35 + 0.35 * pulse);
-                    Theme.DrawGlowBorder(g, new RectangleF(1, 1, bounds.Width - 2, bounds.Height - 2), CornerRadius, glowIntensity);
-                    break;
-                }
-
-            case Phase.Fade:
-            default:
-                {
-                    bounds = _restBounds;
-                    double t = Math.Min(1.0, _stopwatch.ElapsedMilliseconds / (double)FadeMs);
-                    opacity = 1.0 - Theme.EaseInCubic(t);
-                    frame = new Bitmap(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height), PixelFormat.Format32bppArgb);
-                    using var g = Graphics.FromImage(frame);
-                    g.SmoothingMode = SmoothingMode.AntiAlias;
-                    g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                    DrawClippedContent(g, _smallSource, bounds);
-                    Theme.DrawGlowBorder(g, new RectangleF(1, 1, bounds.Width - 2, bounds.Height - 2), CornerRadius, 0.5f);
-                    break;
-                }
+                    Phase.Fly => (float)Math.Min(1.0, ms / 100.0),
+                    Phase.Hold => hover ? 1.0f : (float)(0.35 + 0.35 * (Math.Sin(ms / (double)PulsePeriodMs * 2 * Math.PI) + 1) / 2),
+                    _ => 0.5f,
+                };
+                if (_phase == Phase.Fly && glow < 1f)
+                    DrawHighlightBorder(g, new Rectangle(0, 0, bounds.Width, bounds.Height), 1 - glow);
+                Theme.DrawGlowBorder(g, new RectangleF(1, 1, bounds.Width - 2, bounds.Height - 2), CornerRadius, glow);
+            }
         }
 
+        double opacity = _phase == Phase.Fade ? 1.0 - Theme.EaseInCubic(Math.Min(1.0, ms / (double)FadeMs)) : 1.0;
         if (opacity < 1.0) ApplyOpacity(frame, opacity);
         LayeredSurface.Update(Handle, frame, bounds.Location);
-        frame.Dispose();
     }
 
     private static void DrawClippedContent(Graphics g, Bitmap source, Rectangle destBounds)
@@ -588,21 +473,15 @@ public sealed class CaptureFlyoutForm : Form
 
     private static void ApplyOpacity(Bitmap frame, double opacity)
     {
-        var rect = new Rectangle(0, 0, frame.Width, frame.Height);
-        var data = frame.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+        var data = frame.LockBits(new Rectangle(0, 0, frame.Width, frame.Height), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
         try
         {
-            int stride = data.Stride;
-            byte[] buf = new byte[stride * frame.Height];
+            byte[] buf = new byte[data.Stride * frame.Height];
             Marshal.Copy(data.Scan0, buf, 0, buf.Length);
-            for (int i = 3; i < buf.Length; i += 4)
-                buf[i] = (byte)(buf[i] * opacity);
+            for (int i = 3; i < buf.Length; i += 4) buf[i] = (byte)(buf[i] * opacity);
             Marshal.Copy(buf, 0, data.Scan0, buf.Length);
         }
-        finally
-        {
-            frame.UnlockBits(data);
-        }
+        finally { frame.UnlockBits(data); }
     }
 
     private static Rectangle Lerp(Rectangle a, Rectangle b, double t) => new(
@@ -613,16 +492,8 @@ public sealed class CaptureFlyoutForm : Form
 
     private void OpenFileAndClose()
     {
-        try
-        {
-            // Chụp bằng chứng không lưu file (chỉ clipboard) -> _filePath rỗng, không có gì để mở.
-            if (!string.IsNullOrEmpty(_filePath))
-                Process.Start(new ProcessStartInfo(_filePath) { UseShellExecute = true });
-        }
-        catch
-        {
-            // Không mở được thì thôi, không phải lỗi nghiêm trọng.
-        }
+        // Chụp bằng chứng chỉ vào clipboard nên _filePath rỗng; mở không được thì thôi.
+        if (!string.IsNullOrEmpty(_filePath)) Safe.Try(() => Process.Start(new ProcessStartInfo(_filePath) { UseShellExecute = true }));
         CloseAndDispose();
     }
 
@@ -636,27 +507,12 @@ public sealed class CaptureFlyoutForm : Form
     {
         base.OnFormClosed(e);
         _timer.Dispose();
-        _original?.Dispose();
-        _original = null;
-        _smallSource?.Dispose();
-        _smallSource = null;
-        _hoverSource?.Dispose();
-        _hoverSource = null;
+        foreach (var b in new[] { _original, _smallSource, _hoverSource }) b?.Dispose();
+        _original = _smallSource = _hoverSource = null;
     }
 
     // Ẩn khỏi Alt+Tab, không cướp focus, và bật layered window cho alpha per-pixel.
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            const int WS_EX_TOOLWINDOW = 0x80;
-            const int WS_EX_NOACTIVATE = 0x08000000;
-            const int WS_EX_LAYERED = 0x00080000;
-            var cp = base.CreateParams;
-            cp.ExStyle |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED;
-            return cp;
-        }
-    }
+    protected override int ExtraExStyle => 0x80 | 0x08000000 | 0x00080000;   // WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED
 
     protected override bool ShowWithoutActivation => true;
 }
@@ -676,42 +532,23 @@ internal static class LayeredSurface
         IntPtr oldBitmap = IntPtr.Zero;
         try
         {
+            // biHeight âm = DIB top-down, khớp thứ tự hàng của BitmapData khi copy.
             var bmi = new Native.BITMAPINFOHEADER
             {
-                biSize = (uint)Marshal.SizeOf<Native.BITMAPINFOHEADER>(),
-                biWidth = w,
-                biHeight = -h, // top-down DIB: khớp thứ tự hàng của BitmapData khi copy
-                biPlanes = 1,
-                biBitCount = 32,
-                biCompression = 0, // BI_RGB
+                biSize = (uint)Marshal.SizeOf<Native.BITMAPINFOHEADER>(), biWidth = w, biHeight = -h, biPlanes = 1, biBitCount = 32, biCompression = 0 /* BI_RGB */,
             };
-
             hBitmap = Native.CreateDIBSection(screenDc, ref bmi, 0, out IntPtr bits, IntPtr.Zero, 0);
             if (hBitmap == IntPtr.Zero || bits == IntPtr.Zero) return;
 
             var srcData = frame.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-            try
-            {
-                CopyPremultiplied(srcData, bits, w, h);
-            }
-            finally
-            {
-                frame.UnlockBits(srcData);
-            }
+            try { CopyPremultiplied(srcData, bits, w, h); }
+            finally { frame.UnlockBits(srcData); }
 
             oldBitmap = Native.SelectObject(memDc, hBitmap);
-
             var ptDst = new Native.POINT(screenLocation.X, screenLocation.Y);
             var size = new Native.SIZE(w, h);
             var ptSrc = new Native.POINT(0, 0);
-            var blend = new Native.BLENDFUNCTION
-            {
-                BlendOp = Native.AC_SRC_OVER,
-                BlendFlags = 0,
-                SourceConstantAlpha = 255,
-                AlphaFormat = Native.AC_SRC_ALPHA,
-            };
-
+            var blend = new Native.BLENDFUNCTION { BlendOp = Native.AC_SRC_OVER, BlendFlags = 0, SourceConstantAlpha = 255, AlphaFormat = Native.AC_SRC_ALPHA };
             Native.UpdateLayeredWindow(hwnd, IntPtr.Zero, ref ptDst, ref size, memDc, ref ptSrc, 0, ref blend, Native.ULW_ALPHA);
         }
         finally
@@ -727,31 +564,20 @@ internal static class LayeredSurface
     private static void CopyPremultiplied(BitmapData src, IntPtr destBits, int w, int h)
     {
         int srcStride = src.Stride;
-        int destStride = w * 4;
-
         byte[] srcBuf = new byte[srcStride * h];
         Marshal.Copy(src.Scan0, srcBuf, 0, srcBuf.Length);
-        byte[] destBuf = new byte[destStride * h];
+        byte[] destBuf = new byte[w * 4 * h];
 
         for (int y = 0; y < h; y++)
-        {
-            int sRow = y * srcStride;
-            int dRow = y * destStride;
             for (int x = 0; x < w; x++)
             {
-                int si = sRow + x * 4;
-                int di = dRow + x * 4;
-                byte b = srcBuf[si + 0];
-                byte g = srcBuf[si + 1];
-                byte r = srcBuf[si + 2];
+                int si = y * srcStride + x * 4, di = (y * w + x) * 4;
                 byte a = srcBuf[si + 3];
-
-                destBuf[di + 0] = (byte)(b * a / 255);
-                destBuf[di + 1] = (byte)(g * a / 255);
-                destBuf[di + 2] = (byte)(r * a / 255);
+                destBuf[di] = (byte)(srcBuf[si] * a / 255);
+                destBuf[di + 1] = (byte)(srcBuf[si + 1] * a / 255);
+                destBuf[di + 2] = (byte)(srcBuf[si + 2] * a / 255);
                 destBuf[di + 3] = a;
             }
-        }
 
         Marshal.Copy(destBuf, 0, destBits, destBuf.Length);
     }
@@ -773,10 +599,7 @@ internal static class Theme
     public static GraphicsPath RoundedRect(RectangleF rect, float radius)
     {
         var path = new GraphicsPath();
-        float d = radius * 2;
-        if (d > rect.Width) d = Math.Max(0, rect.Width);
-        if (d > rect.Height) d = Math.Max(0, rect.Height);
-
+        float d = Math.Min(radius * 2, Math.Max(0, Math.Min(rect.Width, rect.Height)));
         if (d <= 0)
         {
             path.AddRectangle(rect);
@@ -817,77 +640,28 @@ internal static class Theme
     public static double EaseOutQuad(double t) => 1 - (1 - t) * (1 - t);
 }
 
-// ==================== Native ====================
+// ==================== OverlayForm ====================
 
-internal static class Native
+// Nền chung của các cửa sổ nổi không viền: thanh chụp, khung khoanh vùng, ảnh bay về góc.
+public class OverlayForm : Form
 {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct POINT
+    protected OverlayForm()
     {
-        public int X;
-        public int Y;
-        public POINT(int x, int y) { X = x; Y = y; }
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        TopMost = true;
+        StartPosition = FormStartPosition.Manual;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct SIZE
+    protected virtual int ExtraExStyle => 0;
+
+    protected override CreateParams CreateParams
     {
-        public int cx;
-        public int cy;
-        public SIZE(int cx, int cy) { this.cx = cx; this.cy = cy; }
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= ExtraExStyle;
+            return cp;
+        }
     }
-
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct BLENDFUNCTION
-    {
-        public byte BlendOp;
-        public byte BlendFlags;
-        public byte SourceConstantAlpha;
-        public byte AlphaFormat;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct BITMAPINFOHEADER
-    {
-        public uint biSize;
-        public int biWidth;
-        public int biHeight;
-        public ushort biPlanes;
-        public ushort biBitCount;
-        public uint biCompression;
-        public uint biSizeImage;
-        public int biXPelsPerMeter;
-        public int biYPelsPerMeter;
-        public uint biClrUsed;
-        public uint biClrImportant;
-    }
-
-    public const uint ULW_ALPHA = 0x02;
-    public const byte AC_SRC_OVER = 0x00;
-    public const byte AC_SRC_ALPHA = 0x01;
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool UpdateLayeredWindow(IntPtr hWnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize,
-        IntPtr hdcSrc, ref POINT pptSrc, uint crKey, ref BLENDFUNCTION pblend, uint dwFlags);
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetDC(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
-
-    [DllImport("gdi32.dll")]
-    public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
-
-    [DllImport("gdi32.dll")]
-    public static extern bool DeleteDC(IntPtr hdc);
-
-    [DllImport("gdi32.dll")]
-    public static extern IntPtr SelectObject(IntPtr hdc, IntPtr hObj);
-
-    [DllImport("gdi32.dll")]
-    public static extern bool DeleteObject(IntPtr hObj);
-
-    [DllImport("gdi32.dll")]
-    public static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFOHEADER pbmi, uint usage, out IntPtr ppvBits, IntPtr hSection, uint offset);
 }
