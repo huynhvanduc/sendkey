@@ -65,6 +65,9 @@ public sealed class AppSettings
 
     public string GotoCurrentHotkey { get; set; } = "Ctrl+Shift+G";
 
+    // Ctrl+Shift+Q chỉ đè Window.ActivateQuickLaunchPreviousCategory của VS, không đè phím nào của editor.
+    public string MoveArrowHotkey { get; set; } = "Ctrl+Shift+Q";
+
     public string IfSetStatement { get; set; } = "SET(\"{var}\", \"{value}\")";
 
     public int? StripX { get; set; }

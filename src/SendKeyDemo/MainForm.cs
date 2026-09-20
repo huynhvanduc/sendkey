@@ -156,7 +156,8 @@ public class MainForm : Form
             BuildTray();
             RegisterHotkeys();
             _hotkeyHint.Text = $"Trong đợt:   {_settings.DefineRegionHotkey} khoanh vùng (1 lần)   ·   " +
-                $"{_settings.GotoCurrentHotkey} đặt breakpoint   ·   {_settings.CaptureRegionHotkey} chụp   ·   {_settings.ClearBreakpointsHotkey} xóa breakpoint";
+                $"{_settings.GotoCurrentHotkey} đặt breakpoint   ·   {_settings.MoveArrowHotkey} dời mũi tên vàng   ·   " +
+                $"{_settings.CaptureRegionHotkey} chụp   ·   {_settings.ClearBreakpointsHotkey} xóa breakpoint";
 
             VsAutomation.OleMessageFilter.Register();
             LoadInstances();
@@ -395,6 +396,8 @@ public class MainForm : Form
             ClearBreakpointsHotkey, failed);
         RegisterOne(_settings.GotoCurrentHotkey, defaults.GotoCurrentHotkey, "Chạy cặp đang chọn",
             () => _evidence?.Run(), failed);
+        RegisterOne(_settings.MoveArrowHotkey, defaults.MoveArrowHotkey, "Dời mũi tên vàng",
+            () => _evidence?.MoveArrow(), failed);
 
         if (failed.Count > 0) Log("Hotkey: không đăng ký được: " + string.Join("; ", failed));
     }
@@ -469,6 +472,11 @@ public class MainForm : Form
         _tray.Dispose();
     }
 
-    internal void Log(string msg) =>
-        _log.AppendText($"{DateTime.Now:HH:mm:ss}  {msg}{Environment.NewLine}");
+    // Hotkey copy là global nên không copy được chữ ra khỏi app — mọi dòng log phải có đường ra bằng file.
+    internal void Log(string msg)
+    {
+        string line = $"{DateTime.Now:HH:mm:ss}  {msg}{Environment.NewLine}";
+        _log.AppendText(line);
+        Safe.Try(() => File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "sendkeydemo.log"), line));
+    }
 }

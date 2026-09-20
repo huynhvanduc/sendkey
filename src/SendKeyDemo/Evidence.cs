@@ -398,6 +398,42 @@ public sealed class EvidenceSession : IDisposable
         Show($"{TargetText(stops, 0)} · chờ F5, Watch tự điền khi dừng", StripState.Pending);
     }
 
+    // ---------------- Q: dời mũi tên vàng ----------------
+
+    // Dời tới h.Line như phím G chứ không phải h.LabelLine: dòng khai báo nhãn không phải lệnh thực thi.
+    public void MoveArrow()
+    {
+        if (!_active) return;
+        if (_host.CurrentDte() is not { } dte) { Block("Chưa chọn instance VS — mở cửa sổ cấu hình bấm Refresh."); return; }
+
+        // Đích là dòng con trỏ trong VS, nên dời được tới cả dòng user tự click — không cần copy, không cần bấm G.
+        if (VsAutomation.Caret(dte) is not { } caret || caret.Line == 0)
+        { Block("Không đọc được dòng con trỏ trong VS — click vào dòng code muốn dời tới."); return; }
+
+        string file = caret.File;
+        int line = caret.Line;
+
+        // Copy label trơn thì con trỏ đậu ở dòng nhãn, mà breakpoint lẫn mũi tên đều không bám được dòng nhãn.
+        if (_nav.Count > 0)
+        {
+            var h = _nav[_navIndex];
+            if (h.LabelLine == line && h.Line > 0 && string.Equals(h.File, file, StringComparison.OrdinalIgnoreCase)) line = h.Line;
+        }
+
+        string? err;
+        try { err = VsAutomation.SetNextStatement(dte, file, line); }
+        catch (Exception ex) { Block("Lỗi thao tác VS: " + ex.Message); return; }
+        if (err != null) { Block(err); return; }
+
+        _host.Log($"Dời mũi tên vàng tới {Path.GetFileName(file)}:{line} — code ở giữa KHÔNG chạy.");
+
+        // Chỉ chấm lại khi mũi tên đúng vào một điểm dừng đã bấm G; dời ra chỗ khác mà chấm thì đỏ oan.
+        if (_stops.Any(s => s.Line == line && string.Equals(s.File, file, StringComparison.OrdinalIgnoreCase)))
+        { Recheck(refresh: true); return; }
+
+        Show($"đã dời mũi tên vàng · {Path.GetFileName(file)}:{line}", StripState.Ok);
+    }
+
     // ---------------- chấm + chụp ----------------
 
     public CheckResult? Recheck(bool fromEvent = false, bool refresh = false)
@@ -477,7 +513,7 @@ public sealed class EvidenceSession : IDisposable
         _confirmed = null;
 
         var shot = ScreenCapture.GrabClean(region, _settings, _bar);
-        if (!shot.Ok) { Block(shot.Message); _host.Log("Chụp: " + shot.Message); return; }
+        if (!shot.Ok) { Block(shot.Message); return; }
 
         var stop = _stops[_currentStop];
         if (_host.CurrentDte() is { } dteNow)
@@ -586,6 +622,7 @@ public sealed class EvidenceSession : IDisposable
     {
         _bar.SetStatus(StripState.Block, reason);
         Beep(StripState.Block);
+        _host.Log("BỊ CHẶN: " + reason);
     }
 
     static bool? LineMentions(string file, int line, string ident) => Safe.Try<bool?>(() =>

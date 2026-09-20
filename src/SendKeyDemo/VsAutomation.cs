@@ -64,6 +64,13 @@ public static class VsAutomation
     // Đi thẳng ActiveDocument: DTE.ActiveWindow trả null khi cửa sổ Watch đang active.
     public static string? ActiveFile(DTE dte) => Safe.Try<string?>(() => dte.ActiveDocument?.FullName, null);
 
+    // Dòng con trỏ đang đậu trong VS, để phím dời mũi tên nhắm được cả dòng user tự click.
+    public static (string File, int Line)? Caret(DTE dte) => Safe.Try<(string, int)?>(() =>
+    {
+        var doc = dte.ActiveDocument;
+        return doc == null ? null : (doc.FullName, ((TextSelection)doc.Selection).CurrentLine);
+    }, null);
+
     static EnvDTE.Window Open(DTE dte, string file)
     {
         var win = dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView);
@@ -135,6 +142,39 @@ public static class VsAutomation
         }
         return $"đã đặt breakpoint tại {Path.GetFileName(file)}:{line}";
     }
+
+    // SetNextStatement() không nhận tham số mà bám con trỏ, nên phải mở file và đặt con trỏ vào dòng đích trước.
+    public static string? SetNextStatement(DTE dte, string file, int line)
+    {
+        if (!File.Exists(file)) return $"file không tồn tại: {file}";
+        if (!InBreakMode(dte)) return "Chưa dừng — chỉ dời được mũi tên vàng khi chương trình đang dừng.";
+
+        var win = Open(dte, file);
+        // Con trỏ phải nằm đúng trên ký tự code đầu dòng: cột 1 rơi vào khoảng trắng thụt đầu dòng, VS trả "no executable code at this location".
+        ((TextSelection)win.Document.Selection).MoveToLineAndOffset(line, FirstCodeColumn(win, line), false);
+        try { dte.Debugger.SetNextStatement(); }
+        catch (COMException ex)
+        {
+            // Nói đúng lỗi VS trả về kèm trạng thái đo được, đừng đoán hộ VS rồi in ra như thể là chẩn đoán.
+            var caret = Safe.Try(() => $"{Path.GetFileName(dte.ActiveDocument.FullName)}:{((TextSelection)dte.ActiveDocument.Selection).CurrentLine}", "?");
+            var frame = Safe.Try(() => dte.Debugger.CurrentStackFrame.FunctionName, "?");
+            var hit = Safe.Try(() => $"{Path.GetFileName(dte.Debugger.BreakpointLastHit.File)}:{dte.Debugger.BreakpointLastHit.FileLine}", "?");
+            return $"không dời được tới {Path.GetFileName(file)}:{line} — VS trả 0x{ex.HResult:X8}: {ex.Message.Trim()} " +
+                   $"[con trỏ {caret} · frame {frame} · mũi tên {hit} · VS foreground={Native.GetForegroundWindow() == new IntPtr(dte.MainWindow.HWnd)}]";
+        }
+        dte.MainWindow.Activate();
+        return null;
+    }
+
+    // Đọc dòng từ buffer của editor chứ không từ đĩa, vì file có thể đang sửa mà chưa lưu.
+    static int FirstCodeColumn(EnvDTE.Window win, int line) => Safe.Try(() =>
+    {
+        var doc = (TextDocument)win.Document.Object("TextDocument");
+        var p = doc.CreateEditPoint();
+        p.MoveToLineAndOffset(line, 1);
+        string text = p.GetLines(line, line + 1);
+        return text.Trim().Length == 0 ? 1 : 1 + (text.Length - text.TrimStart().Length);
+    }, 1);
 
     public static DebugSnapshot ReadDebugState(DTE dte, string csFile, IReadOnlyList<string> exprs)
     {

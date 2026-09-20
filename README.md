@@ -89,6 +89,13 @@ VS:     app xoá Watch cũ, thêm đúng biến của dòng đó, chấm trên t
 
 - Copy **không bao giờ đụng tới breakpoint**, và không cướp focus khỏi Excel — bạn cứ copy tiếp ô sau.
   Chỉ `Ctrl+Shift+G` mới đặt breakpoint và đưa VS lên trước.
+- `Ctrl+Shift+Q` **dời mũi tên vàng** tới **dòng con trỏ đang đậu trong VS** — kể cả dòng bạn tự click, không cần
+  copy gì và không cần bấm `Ctrl+Shift+G` trước; đúng bằng thao tác kéo mũi tên bằng tay trong VS
+  (VS gọi là Set Next Statement). Chỉ dùng được khi chương trình **đang dừng**, và chỉ nhảy được **trong cùng
+  một hàm** với mũi tên vàng.
+
+  ⚠ Code nằm giữa chỗ cũ và chỗ mới **không chạy**, nên biến ở những dòng bị nhảy qua sẽ không được gán. Chụp
+  bằng chứng sau khi nhảy cóc thì phải tự biết giá trị nào là thật.
 - Tìm biến khớp theo **tên trọn vẹn**, nên `rc` không dính `rc2` / `rcTotal` / `_rc`. Mệnh đề (vd `rc != 0`)
   thì khớp theo văn bản, bỏ qua khác biệt khoảng trắng — `if(rc!=0)` vẫn tìm ra.
 - Phạm vi tìm là **class đang debug**: khi chương trình đang dừng, app lấy file có **mũi tên vàng** làm mốc,
@@ -140,14 +147,16 @@ chỉ lấy cặp trông như biến batch (`%X%`, `!X!`, `if …`, `goto …`),
 |---|---|
 | `Ctrl+Shift+R` | Khoanh vùng chụp |
 | `Ctrl+Shift+G` | Đặt breakpoint ở dòng đang chọn + thêm biến đang chọn vào Watch (thiếu mapping thì mở ô gõ C#) |
+| `Ctrl+Shift+Q` | Dời **mũi tên vàng** tới dòng đang chọn (Set Next Statement) — code ở giữa **không chạy** |
 | `Ctrl+Shift+S` | Trong đợt: chụp bằng chứng vào clipboard. Ngoài đợt: chụp vùng đã nhớ, lưu PNG |
 | `Ctrl+Shift+F` | Chụp toàn màn hình, lưu PNG |
 | `Ctrl+Shift+W` | Chụp cửa sổ đang active, lưu PNG |
 | `Ctrl+Shift+D` | Xóa breakpoint app đã đặt + làm sạch Watch + quên nhóm đang chọn. Ngoài đợt: xóa breakpoint trong class đang debug |
 
 Phím của app là phím toàn cục: lúc app chạy, nó đè phím cùng tổ hợp của VS — `Ctrl+Shift+S` (Save All),
-`Ctrl+Shift+F` (Find in Files), `Ctrl+Shift+D` (phím mở đầu chord của menu Debug). Đổi phím trong
-`settings.json` nếu cần (`CaptureRegionHotkey`, `FullScreenHotkey`, `ClearBreakpointsHotkey`, …).
+`Ctrl+Shift+F` (Find in Files), `Ctrl+Shift+D` (phím mở đầu chord của menu Debug), `Ctrl+Shift+Q`
+(lùi category trong ô search). Đổi phím trong `settings.json` nếu cần (`CaptureRegionHotkey`,
+`FullScreenHotkey`, `ClearBreakpointsHotkey`, `MoveArrowHotkey`, …).
 
 Khi bấm `Ctrl+Shift+S`, app điền lại Watch (để VS tính lại giá trị) và kiểm tra trạng thái VS rồi mới chụp. Lúc chụp, app tạm ẩn thanh nổi và dời chuột
 ra ngoài vùng chụp (để ảnh không dính tooltip giá trị biến), chụp xong trả chuột về chỗ cũ.
@@ -218,6 +227,9 @@ App không bao giờ tự gõ phím vào VS, để khỏi gõ nhầm vào file `
 | 16i | Chuột phải vào thanh → **Thoát** | Tiến trình `SendKeyDemo` không còn trong Task Manager |
 | 17 | Bấm `Ctrl+Shift+S` khi chưa chạy | Không có ảnh, chấm đỏ `❌ Chưa dừng ở breakpoint…` |
 | 18 | Cho chương trình (đang debug sẵn) chạy tới dòng 34 | Watch 1 chỉ còn `rc` và `inputFile.EndsWith(".csv") ? 0 : 12` (dòng cũ bị xoá) — dòng gán nên có cả vế phải; chấm xanh lá. App không tự chạy / khởi động lại debug |
+| 18b | Đang dừng ở dòng 34, copy `VALIDATE_HEADER` rồi `「%HDR_OK%」` (thanh chỉ `Program.cs:39`), bấm `Ctrl+Shift+Q` | Mũi tên vàng nhảy thẳng tới **dòng 39**, bỏ qua dòng 35–38: cửa sổ Output **không** in dòng `CHECK_INPUT: …` của dòng 35. Log app ghi `code ở giữa KHÔNG chạy` |
+| 18c | Cho chạy tiếp cho hết debug, rồi bấm `Ctrl+Shift+Q` | Chấm đỏ `Chưa dừng — chỉ dời được mũi tên vàng khi chương trình đang dừng.`; không có gì xê dịch trong VS |
+| 18d | Đang dừng trong `Program.cs`, copy `RECALC` rồi `「%AMT%」` (pin `csharpFile=Steps.cs`), bấm `Ctrl+Shift+Q` | Chấm đỏ `không dời được … mũi tên vàng chỉ nhảy được trong cùng một hàm…` — nhảy sang hàm khác bị VS từ chối, app báo lại nguyên văn |
 | 19 | Bấm `Ctrl+Shift+S` | Cửa sổ lúc copy nổi lên; Ctrl+V ra ảnh; thanh `✓ đủ 1 ảnh` |
 | 20 | Copy `「%INPUT_FILE%」`, bấm `Ctrl+Shift+G` | Thành 2 điểm dừng, **mỗi điểm 1 biến của test case**: dòng 33 Watch `inputFile` + `"orders.csv"`, dòng 34 Watch `rc` + vế phải. Thanh `1/2` |
 | 20b | Đi tới dòng 35 (dòng log) rồi dòng 36 (dòng `if`), mỗi dòng bấm `Ctrl+Shift+G` | Dòng 35 Watch mỗi `rc`; dòng 36 Watch `rc != 0` — Watch đổi theo hình dạng dòng |
